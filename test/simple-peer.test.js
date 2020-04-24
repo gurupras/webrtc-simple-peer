@@ -113,7 +113,10 @@ describe('SimplePeer', () => {
   test('Calls setupPeer for every unique request', async () => {
     const simplePeer = create()
     await simplePeer.setup()
-    simplePeer.setupPeer = jest.fn()
+    simplePeer.setupPeer = jest.fn().mockImplementation((peer, metadata, discoveryID) => {
+      simplePeer.gainMap[peer._id] = []
+      simplePeer.discoveryIDToPeer[discoveryID] = peer
+    })
 
     const request1 = mockRequest()
     const request2 = mockRequest()

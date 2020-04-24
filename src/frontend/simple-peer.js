@@ -50,8 +50,7 @@ class SimplePeer extends AbstractWebRTC {
         }, {
           ...this.peerOpts
         })
-        this.setupPeer(peer, metadata)
-        this.discoveryIDToPeer[peerID] = peer
+        this.setupPeer(peer, metadata, peerID)
       }
     })
     this.signalClient = signalClient
@@ -68,8 +67,7 @@ class SimplePeer extends AbstractWebRTC {
       }, {
         ...this.peerOpts
       })
-      this.setupPeer(peer, metadata)
-      this.discoveryIDToPeer[initiator] = peer
+      this.setupPeer(peer, metadata, initiator)
     })
     signalClient.discover()
   }
@@ -78,8 +76,9 @@ class SimplePeer extends AbstractWebRTC {
     return this.signalClient.discover()
   }
 
-  setupPeer (peer, metadata) {
+  setupPeer (peer, metadata, discoveryID) {
     this.gainMap[peer._id] = []
+    this.discoveryIDToPeer[discoveryID] = peer
     peer.peerID = peer._id // Expose a standard UID
     peer.on('data', data => {
       let json
@@ -172,6 +171,7 @@ class SimplePeer extends AbstractWebRTC {
     const closePeer = () => {
       delete this.peers[peer._id]
       delete this.gainMap[peer._id]
+      delete this.discoveryIDToPeer[discoveryID]
     }
     peer.on('destroy', closePeer)
     // console.log(`peer: ${peer._id} has been set up`)
