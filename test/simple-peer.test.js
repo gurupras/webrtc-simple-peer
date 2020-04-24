@@ -53,8 +53,11 @@ function generateFakeSimpleSignalPeer (id = nanoid(), userIdentifier = nanoid())
 }
 
 function mockSimpleSignalClient (sp) {
-  sp.signalClient.connect = jest.fn().mockImplementation(async (peerID, metadata, opts) => {
-    return generateFakeSimpleSignalPeer()
+  Object.assign(sp.signalClient, {
+    connect: jest.fn().mockImplementation(async (peerID, metadata, opts) => {
+      return generateFakeSimpleSignalPeer()
+    }),
+    discover: jest.fn()
   })
 }
 
@@ -83,6 +86,14 @@ describe('SimplePeer', () => {
     await simplePeer.signalClient.emit('discover', [nanoid(), nanoid()])
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
     await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+  })
+
+  test('Calling discovery runs signalClient discovery', async () => {
+    const simplePeer = create()
+    await simplePeer.setup()
+    mockSimpleSignalClient(simplePeer)
+    simplePeer.discover()
+    expect(simplePeer.signalClient.discover).toHaveBeenCalledTimes(1)
   })
 
   test('Does not connect to an already connected peer', async () => {
@@ -570,13 +581,18 @@ describe('SimplePeer', () => {
     test('Throw error if no peer found', async () => {
       expect(() => simplePeer.updateVolume(0.3, 'bad')).toThrow()
     })
+    test('Throw error if no stream type specified', async () => {
+      simplePeer.gainMap[peer._id] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
+      expect(() => simplePeer.updateVolume(0.3, peer._id)).toThrow()
+    })
     test('Sends volume data in the right format', async () => {
       simplePeer.gainMap[peer._id] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
       const volume = 0.3
-      simplePeer.updateVolume(volume, peer._id)
+      simplePeer.updateVolume(volume, peer._id, 'screen')
       const expected = {
         action: 'volume-control',
-        volume
+        volume,
+        type: 'screen'
       }
       expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expected))
     })

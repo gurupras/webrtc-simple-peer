@@ -39,7 +39,7 @@ class SimplePeer extends AbstractWebRTC {
 
     const signalClient = new SimpleSignalClient(socket)
     const { userIdentifier } = this
-    signalClient.on('discover', async function (peerIDs = []) {
+    signalClient.on('discover', async (peerIDs = []) => {
       for (const peerID of peerIDs) {
         if (this.discoveryIDToPeer[peerID]) {
           // Don't connect to an already connected peer
@@ -53,7 +53,7 @@ class SimplePeer extends AbstractWebRTC {
         this.setupPeer(peer, metadata)
         this.discoveryIDToPeer[peerID] = peer
       }
-    }.bind(this))
+    })
     this.signalClient = signalClient
 
     signalClient.on('request', async (request) => {
@@ -72,6 +72,10 @@ class SimplePeer extends AbstractWebRTC {
       this.discoveryIDToPeer[initiator] = peer
     })
     signalClient.discover()
+  }
+
+  discover () {
+    return this.signalClient.discover()
   }
 
   setupPeer (peer, metadata) {
@@ -264,12 +268,15 @@ class SimplePeer extends AbstractWebRTC {
     }
   }
 
-  updateVolume (volume, peerID) {
+  updateVolume (volume, peerID, type) {
     const peer = this.peers[peerID]
     if (!peer) {
       throw new Error(`No peer found with id=${peerID}`)
     }
-    peer.send(JSON.stringify({ action: 'volume-control', volume }))
+    if (!type) {
+      throw new Error('Must specify a stream type')
+    }
+    peer.send(JSON.stringify({ action: 'volume-control', volume, type }))
   }
 
   destroy () {
