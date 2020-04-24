@@ -34,6 +34,7 @@ class FakePeer {
   constructor (_id = nanoid()) {
     new Emittery().bindMethods(this)
     this._id = _id
+    this._backendID = nanoid()
     this._remoteStreams = []
   }
 }
@@ -57,6 +58,14 @@ function mockSimpleSignalClient (sp) {
   })
 }
 
+function mockRequest (peer = new FakePeer(), metadata = generateFakeMetadata()) {
+  return {
+    initiator: peer._backendID,
+    accept: jest.fn().mockReturnValue({ peer, metadata }),
+    reject: jest.fn()
+  }
+}
+
 function create (opts = {}, socket = new Emittery(), userIdentifier = nanoid()) {
   const simplePeer = new SimplePeer(opts, socket, userIdentifier)
   mockGetRTCConfig(simplePeer)
@@ -76,18 +85,35 @@ describe('SimplePeer', () => {
     await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
   })
 
-  test('Calls setupPeer for every request', async () => {
+  test('Does not connect to an already connected peer', async () => {
+    const simplePeer = create()
+    await simplePeer.setup()
+    simplePeer.setupPeer = jest.fn()
+    mockSimpleSignalClient(simplePeer)
+    const peers = [nanoid(), nanoid()]
+    // Pretend to have connected to peers[1]
+    simplePeer.discoveryIDToPeer[peers[1]] = {}
+    await simplePeer.signalClient.emit('discover', peers)
+    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(1)
+    await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, {})
+    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(1)
+  })
+
+  test('Calls setupPeer for every unique request', async () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn()
 
-    const request = {
-      accept: jest.fn().mockReturnValue(generateFakeSimpleSignalPeer())
+    const request1 = mockRequest()
+    const request2 = mockRequest()
+    const requests = [request1, request2, request1]
+    for (const req of requests) {
+      await simplePeer.signalClient.emit('request', req)
     }
-    await simplePeer.signalClient.emit('request', request)
-    await simplePeer.signalClient.emit('request', request)
-    await expect(request.accept).toHaveBeenCalledTimes(2)
-    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+    expect(request1.accept).toHaveBeenCalledTimes(1)
+    expect(request2.accept).toHaveBeenCalledTimes(1)
+    expect(request1.reject).toHaveBeenCalledTimes(1)
+    expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
   })
 
   describe('setupPeer', () => {
