@@ -58,9 +58,6 @@ function mockSimpleSignalClient (sp) {
 }
 
 function create (opts = {}, socket = new Emittery(), userIdentifier = nanoid()) {
-  if (!opts.iceServers) {
-    opts.iceServers = rtcConfig.iceServers
-  }
   const simplePeer = new SimplePeer(opts, socket, userIdentifier)
   mockGetRTCConfig(simplePeer)
   return simplePeer
@@ -68,17 +65,6 @@ function create (opts = {}, socket = new Emittery(), userIdentifier = nanoid()) 
 
 describe('SimplePeer', () => {
   testImplementation(() => create())
-  test('Properly filters out STUN candidates if noSTUN is true', async () => {
-    const simplePeer = create({ noSTUN: true })
-    await simplePeer.setup()
-    expect(simplePeer.iceServers.filter(entry => entry.urls.some(url => url.startsWith('stun:')))).toBeArrayOfSize(0)
-  })
-
-  test('Properly filters out TURN candidates if noTURN is true', async () => {
-    const simplePeer = create({ noTURN: true })
-    await simplePeer.setup()
-    expect(simplePeer.iceServers.filter(entry => entry.urls.some(url => url.startsWith('turn:')))).toBeArrayOfSize(0)
-  })
 
   test('Calls setupPeer for every discovered peer', async () => {
     const simplePeer = create()

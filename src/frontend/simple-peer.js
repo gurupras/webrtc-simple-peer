@@ -6,8 +6,6 @@ const AbstractWebRTC = require('@gurupras/abstract-webrtc')
 class SimplePeer extends AbstractWebRTC {
   constructor (options, socket, userIdentifier) {
     const defaultOpts = {
-      noSTUN: false,
-      noTURN: false,
       peerOpts: {
         config: {
           iceTransportPolicy: 'all'
@@ -26,23 +24,6 @@ class SimplePeer extends AbstractWebRTC {
     }
     options = deepmerge(defaultOpts, options)
     super(options, socket, userIdentifier)
-
-    const { noSTUN, noTURN, iceServers } = options
-    this.iceServers = iceServers.filter(entry => {
-      const isSTUN = entry.urls.some(url => url.startsWith('stun:'))
-      const isTURN = entry.urls.some(url => url.startsWith('turn:'))
-      try {
-        if (isSTUN && noSTUN) {
-          return false
-        }
-        if (isTURN && noTURN) {
-          return false
-        }
-      } catch (e) {
-      }
-      return true
-    })
-    options.peerOpts.config.iceServers = this.iceServers
 
     Object.assign(this, {
       gainMap: {},
