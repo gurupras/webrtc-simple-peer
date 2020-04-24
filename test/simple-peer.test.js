@@ -165,6 +165,18 @@ describe('SimplePeer', () => {
           await expect(promise).toResolve()
         })
       })
+
+      describe('destroy', () => {
+        test('Removes entry from \'peers\'', async () => {
+          simplePeer.gainMap[peer._id] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
+          const promise = testForEvent(simplePeer, 'destroy')
+          await peer.emit('destroy')
+          await expect(promise).toResolve()
+          expect(simplePeer.peers[peer._id]).toBeUndefined()
+          expect(simplePeer.gainMap[peer._id]).toBeUndefined()
+        })
+      })
+
       describe('get-stream-info', () => {
         let streamID
         let nonce

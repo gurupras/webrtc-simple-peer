@@ -26,6 +26,7 @@ class SimplePeer extends AbstractWebRTC {
     super(options, socket, userIdentifier)
 
     Object.assign(this, {
+      peers: {},
       gainMap: {},
       streams: [],
       streamInfo: {}
@@ -63,6 +64,7 @@ class SimplePeer extends AbstractWebRTC {
 
   setupPeer (peer, metadata) {
     this.gainMap[peer._id] = []
+    peer.peerID = peer._id // Expose a standard UID
     peer.on('data', data => {
       let json
       try {
@@ -150,7 +152,14 @@ class SimplePeer extends AbstractWebRTC {
     for (const entry of clonedStreams) {
       peer.addStream(entry.stream)
     }
+
+    const closePeer = () => {
+      delete this.peers[peer._id]
+      delete this.gainMap[peer._id]
+    }
+    peer.on('destroy', closePeer)
     // console.log(`peer: ${peer._id} has been set up`)
+    this.peers[peer._id] = peer
   }
 
   async sendStream (newStream, oldStream, type) {
