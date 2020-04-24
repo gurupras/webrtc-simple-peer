@@ -8,16 +8,8 @@ class SimplePeer extends AbstractWebRTC {
     const defaultOpts = {
       noSTUN: false,
       noTURN: false,
-      requestTimeoutMS: 2000
-    }
-    options = deepmerge(defaultOpts, options)
-    super(options, socket, userIdentifier)
-
-    Object.assign(this, {
-      gainMap: {},
       peerOpts: {
         config: {
-          iceServers: this.iceServers,
           iceTransportPolicy: 'all'
         },
         offerOptions: {
@@ -30,13 +22,11 @@ class SimplePeer extends AbstractWebRTC {
         },
         trickle: true
       },
-      streams: [],
-      streamInfo: {}
-    })
-  }
+      requestTimeoutMS: 2000
+    }
+    options = deepmerge(defaultOpts, options)
+    super(options, socket, userIdentifier)
 
-  async setup () {
-    const { socket, options } = this
     const { noSTUN, noTURN, iceServers } = options
     this.iceServers = iceServers.filter(entry => {
       const isSTUN = entry.urls.some(url => url.startsWith('stun:'))
@@ -52,6 +42,17 @@ class SimplePeer extends AbstractWebRTC {
       }
       return true
     })
+    options.peerOpts.config.iceServers = this.iceServers
+
+    Object.assign(this, {
+      gainMap: {},
+      streams: [],
+      streamInfo: {}
+    })
+  }
+
+  async setup () {
+    const { socket } = this
 
     const signalClient = new SimpleSignalClient(socket)
     const { userIdentifier } = this
