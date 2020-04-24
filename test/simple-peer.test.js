@@ -556,4 +556,29 @@ describe('SimplePeer', () => {
       })
     })
   })
+
+  describe('updateVolume', () => {
+    let simplePeer
+    let peer
+    beforeEach(async () => {
+      peer = new FakePeer()
+      peer.send = jest.fn()
+      simplePeer = create({ requestTimeoutMS: 50 })
+      await simplePeer.setup()
+      await simplePeer.setupPeer(peer, generateFakeMetadata())
+    })
+    test('Throw error if no peer found', async () => {
+      expect(() => simplePeer.updateVolume(0.3, 'bad')).toThrow()
+    })
+    test('Sends volume data in the right format', async () => {
+      simplePeer.gainMap[peer._id] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
+      const volume = 0.3
+      simplePeer.updateVolume(volume, peer._id)
+      const expected = {
+        action: 'volume-control',
+        volume
+      }
+      expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expected))
+    })
+  })
 })

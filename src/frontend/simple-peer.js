@@ -264,6 +264,14 @@ class SimplePeer extends AbstractWebRTC {
     }
   }
 
+  updateVolume (volume, peerID) {
+    const peer = this.peers[peerID]
+    if (!peer) {
+      throw new Error(`No peer found with id=${peerID}`)
+    }
+    peer.send(JSON.stringify({ action: 'volume-control', volume }))
+  }
+
   destroy () {
     this.streams.forEach(stream => {
       stream.getTracks().forEach(t => t.stop())
