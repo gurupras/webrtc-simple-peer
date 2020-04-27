@@ -59,8 +59,7 @@ class SimplePeer extends AbstractWebRTC {
       // console.log(`[simple-peer]: Calling accept with stream`)
       const { initiator } = request
       if (this.discoveryIDToPeer[initiator]) {
-        request.reject('Already connected')
-        return
+        return request.reject('Already connected')
       }
       const { peer, metadata } = await request.accept({
         userIdentifier
@@ -191,8 +190,8 @@ class SimplePeer extends AbstractWebRTC {
         }
 
         const clonedStreamWithGain = this.cloneStreamWithGain(newStream, type)
-        peerStreams.push(clonedStreamWithGain)
         if (clonedStreamWithGain.stream) {
+          peerStreams.push(clonedStreamWithGain)
           // We need to add data to streamInfo before we call addStream
           // This is so that we have the necessary information to respond to the get-stream-info request
           // that we will receive shortly
@@ -208,6 +207,7 @@ class SimplePeer extends AbstractWebRTC {
     }
     if (newStream) {
       this.streams.push(newStream)
+      this.streamInfo[newStream.id] = { type, stream: newStream }
     }
     if (oldStream) {
       const oldStreamIndex = this.streams.indexOf(oldStream)
