@@ -68,7 +68,6 @@ class SimplePeer extends AbstractWebRTC {
       })
       this.setupPeer(peer, metadata, initiator)
     })
-    signalClient.discover()
   }
 
   discover () {
