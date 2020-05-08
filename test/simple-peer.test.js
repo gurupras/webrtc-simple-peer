@@ -106,7 +106,7 @@ describe('SimplePeer', () => {
     simplePeer.discoveryIDToPeer[peers[1]] = {}
     await simplePeer.signalClient.emit('discover', peers)
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(1)
-    await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, {})
+    await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, simplePeer.options.peerOpts)
     await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(1)
   })
 
