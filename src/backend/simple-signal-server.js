@@ -26,6 +26,9 @@ class SimpleSignalServer {
       const { log, getPeersOfSocket, getPeerIDFromSocket } = this
       const { socket } = request
       const peerID = await getPeerIDFromSocket(socket)
+      socket.on('disconnect', () => {
+        delete signalServer._sockets[peerID]
+      })
       const peers = await getPeersOfSocket(socket)
       // Remove peerID from peers if it exists
       const idx = peers.indexOf(peerID)
