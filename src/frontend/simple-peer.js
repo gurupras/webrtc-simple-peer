@@ -215,6 +215,7 @@ class SimplePeer extends AbstractWebRTC {
       if (oldStreamIndex >= 0) {
         this.streams.splice(oldStreamIndex, 1)
       }
+      delete this.streamInfo[oldStream.id]
     }
   }
 

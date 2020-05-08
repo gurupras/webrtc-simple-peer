@@ -545,7 +545,7 @@ describe('SimplePeer', () => {
         oldStream = new FakeMediaStream()
         await simplePeer.sendStream(oldStream, null, 'screen')
         expect(simplePeer.streams).toBeArrayOfSize(1)
-        expect(Object.values(simplePeer.streamInfo)).toBeArrayOfSize(3)
+        expect(Object.values(simplePeer.streamInfo)).toBeArrayOfSize(4) // one for  each peer, and one for the new stream itself
 
         // Now, remove this stream
         await simplePeer.sendStream(null, oldStream, 'screen')
