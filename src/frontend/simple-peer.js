@@ -2,6 +2,7 @@ const deepmerge = require('deepmerge')
 const { nanoid } = require('nanoid')
 const SimpleSignalClient = require('simple-signal-client')
 const AbstractWebRTC = require('@gurupras/abstract-webrtc')
+const AsyncLock = require('async-lock')
 
 class SimplePeer extends AbstractWebRTC {
   constructor (options, socket, userIdentifier) {
@@ -30,7 +31,8 @@ class SimplePeer extends AbstractWebRTC {
       discoveryIDToPeer: {},
       gainMap: {},
       streams: [],
-      streamInfo: {}
+      streamInfo: {},
+      lock: new AsyncLock()
     })
   }
 
@@ -130,36 +132,38 @@ class SimplePeer extends AbstractWebRTC {
     }, this)
 
     peer.on('stream', async stream => {
-      // We need to find out what type of stream this is
-      const { options: { requestTimeoutMS } } = this
-      const nonce = nanoid()
-      const promise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer._id)), requestTimeoutMS)
-        const self = this
-        peer.on('data', function once (data) {
-          try {
-            const json = JSON.parse(data)
-            if (json.action === 'stream-info' && json.nonce === nonce) {
-              clearTimeout(timeout)
-              peer.off('data', once)
-              resolve(json.type)
+      await this.lock.acquire('stream-event', async () => {
+        // We need to find out what type of stream this is
+        const { options: { requestTimeoutMS } } = this
+        const nonce = nanoid()
+        const promise = new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer._id)), requestTimeoutMS)
+          const self = this
+          peer.on('data', function once (data) {
+            try {
+              const json = JSON.parse(data)
+              if (json.action === 'stream-info' && json.nonce === nonce) {
+                clearTimeout(timeout)
+                peer.off('data', once)
+                resolve(json.type)
+              }
+            } catch (e) {
+              self.emit('error', new BadDataError('', peer._id, data))
             }
-          } catch (e) {
-            self.emit('error', new BadDataError('', peer._id, data))
-          }
+          })
         })
+        peer.send(JSON.stringify({
+          action: 'get-stream-info',
+          nonce,
+          streamID: stream.id
+        }))
+        try {
+          const type = await promise
+          await this.emit('stream', { peer, stream, metadata: { ...metadata, type } })
+        } catch (e) {
+          this.emit('error', e)
+        }
       })
-      peer.send(JSON.stringify({
-        action: 'get-stream-info',
-        nonce,
-        streamID: stream.id
-      }))
-      try {
-        const type = await promise
-        this.emit('stream', { peer, stream, metadata: { ...metadata, type } })
-      } catch (e) {
-        this.emit('error', e)
-      }
     })
 
     const clonedStreams = this.cloneAllStreams()
@@ -180,31 +184,33 @@ class SimplePeer extends AbstractWebRTC {
 
   async sendStream (newStream, oldStream, type) {
     if (this.signalClient) {
-      for (const peer of Object.values(this.signalClient.peers())) {
-        const peerStreams = this.gainMap[peer._id]
+      await this.lock.acquire('sendStream', async () => {
+        for (const peer of Object.values(this.signalClient.peers())) {
+          const peerStreams = this.gainMap[peer._id]
 
-        const oldClonedStream = peerStreams.find(e => e.type === type)
-        if (oldClonedStream) {
-          peerStreams.splice(peerStreams.indexOf(oldClonedStream), 1)
-          delete this.streamInfo[oldClonedStream.stream.id]
-          peer.removeStream(oldClonedStream.stream)
-        }
+          const oldClonedStream = peerStreams.find(e => e.type === type)
+          if (oldClonedStream) {
+            peerStreams.splice(peerStreams.indexOf(oldClonedStream), 1)
+            delete this.streamInfo[oldClonedStream.stream.id]
+            peer.removeStream(oldClonedStream.stream)
+          }
 
-        const clonedStreamWithGain = this.cloneStreamWithGain(newStream, type)
-        if (clonedStreamWithGain.stream) {
-          peerStreams.push(clonedStreamWithGain)
-          // We need to add data to streamInfo before we call addStream
-          // This is so that we have the necessary information to respond to the get-stream-info request
-          // that we will receive shortly
-          this.streamInfo[clonedStreamWithGain.stream.id] = { type, stream: clonedStreamWithGain.stream }
-          peer.addStream(clonedStreamWithGain.stream)
+          const clonedStreamWithGain = this.cloneStreamWithGain(newStream, type)
+          if (clonedStreamWithGain.stream) {
+            peerStreams.push(clonedStreamWithGain)
+            // We need to add data to streamInfo before we call addStream
+            // This is so that we have the necessary information to respond to the get-stream-info request
+            // that we will receive shortly
+            this.streamInfo[clonedStreamWithGain.stream.id] = { type, stream: clonedStreamWithGain.stream }
+            await peer.addStream(clonedStreamWithGain.stream)
+          }
+          if (!newStream || newStream.getTracks().length === 0) {
+            peer.send(JSON.stringify({
+              action: 'no-stream'
+            }))
+          }
         }
-        if (!newStream || newStream.getTracks().length === 0) {
-          peer.send(JSON.stringify({
-            action: 'no-stream'
-          }))
-        }
-      }
+      })
     }
     if (newStream) {
       this.streams.push(newStream)
