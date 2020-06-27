@@ -84,8 +84,10 @@ describe('SimplePeer', () => {
     simplePeer.setupPeer = jest.fn()
     mockSimpleSignalClient(simplePeer)
     await simplePeer.signalClient.emit('discover', [nanoid(), nanoid()])
-    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
-    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+    await simplePeer.lock.acquire('discoveryIDToPeer', async () => {
+      await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
+      await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+    })
   })
 
   test('Calling discovery runs signalClient discovery', async () => {
@@ -124,10 +126,12 @@ describe('SimplePeer', () => {
     for (const req of requests) {
       await simplePeer.signalClient.emit('request', req)
     }
-    expect(request1.accept).toHaveBeenCalledTimes(1)
-    expect(request2.accept).toHaveBeenCalledTimes(1)
-    expect(request1.reject).toHaveBeenCalledTimes(1)
-    expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+    await simplePeer.lock.acquire('discoveryIDToPeer', async () => {
+      expect(request1.accept).toHaveBeenCalledTimes(1)
+      expect(request2.accept).toHaveBeenCalledTimes(1)
+      expect(request1.reject).toHaveBeenCalledTimes(1)
+      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+    })
   })
 
   describe('setupPeer', () => {

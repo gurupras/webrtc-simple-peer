@@ -44,16 +44,18 @@ class SimplePeer extends AbstractWebRTC {
     signalClient.on('discover', async (peerIDs = []) => {
       const { options: { peerOpts } } = this
       for (const peerID of peerIDs) {
-        if (this.discoveryIDToPeer[peerID]) {
-          // Don't connect to an already connected peer
-          continue
-        }
-        const { peer, metadata } = await signalClient.connect(peerID, {
-          userIdentifier
-        }, {
-          ...peerOpts
+        this.lock.acquire('discoveryIDToPeer', async () => {
+          if (this.discoveryIDToPeer[peerID]) {
+            // Don't connect to an already connected peer
+            return
+          }
+          const { peer, metadata } = await signalClient.connect(peerID, {
+            userIdentifier
+          }, {
+            ...peerOpts
+          })
+          this.setupPeer(peer, metadata, peerID)
         })
-        this.setupPeer(peer, metadata, peerID)
       }
     })
     this.signalClient = signalClient
@@ -62,15 +64,17 @@ class SimplePeer extends AbstractWebRTC {
       // console.log(`[simple-peer]: Calling accept with stream`)
       const { options: { peerOpts } } = this
       const { initiator } = request
-      if (this.discoveryIDToPeer[initiator]) {
-        return request.reject('Already connected')
-      }
-      const { peer, metadata } = await request.accept({
-        userIdentifier
-      }, {
-        ...peerOpts
+      this.lock.acquire('discoveryIDToPeer', async () => {
+        if (this.discoveryIDToPeer[initiator]) {
+          return request.reject('Already connected')
+        }
+        const { peer, metadata } = await request.accept({
+          userIdentifier
+        }, {
+          ...peerOpts
+        })
+        this.setupPeer(peer, metadata, initiator)
       })
-      this.setupPeer(peer, metadata, initiator)
     })
   }
 
