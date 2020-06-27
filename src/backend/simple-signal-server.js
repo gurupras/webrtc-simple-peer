@@ -32,12 +32,13 @@ class SimpleSignalServer {
       if (idx >= 0) {
         peers.splice(idx, 1)
       }
-      log.debug(`Sending discovery to: ${peerID} with peers=${JSON.stringify(peers)}`)
+      log.info(`Sending discovery to: ${peerID} with peers=${JSON.stringify(peers)}`)
       request.discover(peers)
     })
     signalServer.on('disconnect', () => {
     })
     signalServer.on('request', (request) => request.forward())
+    this.signalServer = signalServer
   }
 }
 

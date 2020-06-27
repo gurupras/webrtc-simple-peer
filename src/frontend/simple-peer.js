@@ -43,19 +43,15 @@ class SimplePeer extends AbstractWebRTC {
     const { userIdentifier } = this
     signalClient.on('discover', async (peerIDs = []) => {
       const { options: { peerOpts } } = this
+      console.log(`Found peers: ${JSON.stringify(peerIDs)}`)
       for (const peerID of peerIDs) {
-        this.lock.acquire('discoveryIDToPeer', async () => {
-          if (this.discoveryIDToPeer[peerID]) {
-            // Don't connect to an already connected peer
-            return
-          }
-          const { peer, metadata } = await signalClient.connect(peerID, {
-            userIdentifier
-          }, {
-            ...peerOpts
-          })
-          this.setupPeer(peer, metadata, peerID)
+        const { peer, metadata } = await signalClient.connect(peerID, {
+          userIdentifier
+        }, {
+          ...peerOpts
         })
+        console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
+        this.setupPeer(peer, metadata, peerID)
       }
     })
     this.signalClient = signalClient
@@ -64,17 +60,13 @@ class SimplePeer extends AbstractWebRTC {
       // console.log(`[simple-peer]: Calling accept with stream`)
       const { options: { peerOpts } } = this
       const { initiator } = request
-      this.lock.acquire('discoveryIDToPeer', async () => {
-        if (this.discoveryIDToPeer[initiator]) {
-          return request.reject('Already connected')
-        }
-        const { peer, metadata } = await request.accept({
-          userIdentifier
-        }, {
-          ...peerOpts
-        })
-        this.setupPeer(peer, metadata, initiator)
+      const { peer, metadata } = await request.accept({
+        userIdentifier
+      }, {
+        ...peerOpts
       })
+      console.log(`[simple-peer]: Accepted request: ${peer._id}`)
+      this.setupPeer(peer, metadata, initiator)
     })
   }
 
@@ -86,6 +78,7 @@ class SimplePeer extends AbstractWebRTC {
     this.gainMap[peer._id] = []
     this.discoveryIDToPeer[discoveryID] = peer
     peer.peerID = peer._id // Expose a standard UID
+    peer.metadata = metadata
     peer.on('data', data => {
       let json
       try {
@@ -177,6 +170,7 @@ class SimplePeer extends AbstractWebRTC {
     }
 
     const closePeer = () => {
+      console.log(`Closing peer: ${peer._id}`)
       delete this.peers[peer._id]
       delete this.gainMap[peer._id]
       delete this.discoveryIDToPeer[discoveryID]
@@ -191,7 +185,10 @@ class SimplePeer extends AbstractWebRTC {
       await this.lock.acquire('sendStream', async () => {
         for (const peer of Object.values(this.signalClient.peers())) {
           const peerStreams = this.gainMap[peer._id]
-
+          if (!peerStreams) {
+            console.warn(`Failed to find peer streams for peerID: ${peer._id}`)
+            continue
+          }
           const oldClonedStream = peerStreams.find(e => e.type === type)
           if (oldClonedStream) {
             peerStreams.splice(peerStreams.indexOf(oldClonedStream), 1)
