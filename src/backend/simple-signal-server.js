@@ -33,7 +33,7 @@ class SimpleSignalServer {
         peers.splice(idx, 1)
       }
       log.debug(`Sending discovery to: ${peerID} with peers=${JSON.stringify(peers)}`)
-      request.discover(peerID, peers)
+      request.discover(peers)
     })
     signalServer.on('disconnect', () => {
     })
