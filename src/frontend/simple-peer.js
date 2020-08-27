@@ -50,8 +50,9 @@ class SimplePeer extends AbstractWebRTC {
         }, {
           ...peerOpts
         })
+        const { userIdentifier: remoteUserIdentifier } = metadata
         console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
-        this.setupPeer(peer, metadata, peerID)
+        this.setupPeer(peer, metadata, remoteUserIdentifier)
       }
     })
     this.signalClient = signalClient
@@ -59,14 +60,21 @@ class SimplePeer extends AbstractWebRTC {
     signalClient.on('request', async (request) => {
       // console.log(`[simple-peer]: Calling accept with stream`)
       const { options: { peerOpts } } = this
-      const { initiator } = request
+      const { metadata: { userIdentifier: remoteUserIdentifier } } = request
+      const oldPeer = this.discoveryIDToPeer[remoteUserIdentifier]
+      if (this.discoveryIDToPeer[remoteUserIdentifier]) {
+        try {
+          oldPeer.destroy()
+        } catch (e) {
+        }
+      }
       const { peer, metadata } = await request.accept({
         userIdentifier
       }, {
         ...peerOpts
       })
       console.log(`[simple-peer]: Accepted request: ${peer._id}`)
-      this.setupPeer(peer, metadata, initiator)
+      this.setupPeer(peer, metadata, remoteUserIdentifier)
     })
   }
 
