@@ -99,7 +99,7 @@ describe('SimplePeer', () => {
     expect(simplePeer.signalClient.discover).toHaveBeenCalledTimes(1)
   })
 
-  test('Does not connect to an already connected peer', async () => {
+  test('Reconnects to an already connected peer', async () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn()
@@ -108,12 +108,12 @@ describe('SimplePeer', () => {
     // Pretend to have connected to peers[1]
     simplePeer.discoveryIDToPeer[peers[1]] = {}
     await simplePeer.signalClient.emit('discover', peers)
-    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(1)
+    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, simplePeer.options.peerOpts)
-    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(1)
+    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
   })
 
-  test('Calls setupPeer for every unique request', async () => {
+  test('Calls setupPeer for every request', async () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn().mockImplementation((peer, metadata, discoveryID) => {
@@ -128,10 +128,10 @@ describe('SimplePeer', () => {
       await simplePeer.signalClient.emit('request', req)
     }
     await simplePeer.lock.acquire('discoveryIDToPeer', async () => {
-      expect(request1.accept).toHaveBeenCalledTimes(1)
+      expect(request1.accept).toHaveBeenCalledTimes(2)
       expect(request2.accept).toHaveBeenCalledTimes(1)
-      expect(request1.reject).toHaveBeenCalledTimes(1)
-      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+      expect(request1.reject).toHaveBeenCalledTimes(0)
+      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(3)
     })
   })
 
