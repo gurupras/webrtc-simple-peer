@@ -1,3 +1,4 @@
+import deepmerge from 'deepmerge'
 import Emittery from 'emittery'
 import { nanoid } from 'nanoid'
 import { testForEvent, testForNoEvent, FakeAudioContext, FakeMediaStream } from '@gurupras/test-helpers'
@@ -36,6 +37,10 @@ class FakePeer {
     this._id = _id
     this._backendID = nanoid()
     this._remoteStreams = []
+  }
+
+  addStream (stream) {
+    this._remoteStreams.push(stream)
   }
 }
 
@@ -238,7 +243,9 @@ describe('SimplePeer', () => {
           expectedResult = {
             action: 'stream-info',
             nonce,
-            type
+            type,
+            videoPaused: true,
+            audioPaused: false
           }
         })
         test('Returns stream info for valid streamID', async () => {
@@ -287,7 +294,9 @@ describe('SimplePeer', () => {
           expect(peer.send).toHaveBeenCalledTimes(1)
           expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
             ...expectedResult,
-            type: null
+            type: null,
+            videoPaused: undefined,
+            audioPaused: undefined
           }))
         })
       })
@@ -602,6 +611,145 @@ describe('SimplePeer', () => {
         type: 'screen'
       }
       expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expected))
+    })
+  })
+
+  describe.each([
+    ['webcam', 'video', 'videoPaused'],
+    ['webcam', 'audio', 'audioPaused']
+  ])('Pause/Resume producer (%s-%s)', (type, kind, field) => {
+    let simplePeer
+    let peers
+    let stream
+    beforeEach(async () => {
+      peers = [...Array(5)].map(x => {
+        const peer = new FakePeer()
+        peer.send = jest.fn()
+        return peer
+      })
+      simplePeer = create({ requestTimeoutMS: 50 })
+      await simplePeer.setup()
+      simplePeer.signalClient.peers = jest.fn().mockReturnValue(peers)
+      await Promise.all(peers.map(peer => simplePeer.setupPeer(peer, generateFakeMetadata())))
+      stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
+      await simplePeer.sendWebcam(stream)
+    })
+    describe('pauseProducer', () => {
+      test('Pausing producer sends \'pauseProducer\' event to all peers', async () => {
+        peers.forEach(peer => {
+          peer.send = jest.fn()
+        })
+        await simplePeer.pauseProducer(type, kind)
+        for (const peer of peers) {
+          expect(peer.send).toHaveBeenCalledTimes(1)
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
+            action: 'pauseProducer',
+            kind,
+            type
+          }))
+        }
+      })
+
+      test(`Pausing producer stores '${field}=true' in streamInfo`, async () => {
+        await simplePeer.pauseProducer(type, kind)
+        const infos = simplePeer._getStreamInfo(type)
+        for (const info of infos) {
+          expect(info[field]).toBeTrue()
+        }
+      })
+
+      test('Peers emit \'stream-update\' event when they receive \'pauseProducer\'', async () => {
+        for (const peer of peers) {
+          let promise = new Promise(resolve => {
+            peer.send = jest.fn().mockImplementation((data) => {
+              const json = JSON.parse(data)
+              const { nonce } = json
+              peer.emit('data', JSON.stringify({
+                action: 'stream-info',
+                nonce,
+                type,
+                kind,
+                videoPaused: false,
+                audioPaused: false
+              }))
+              resolve()
+            })
+          })
+          const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
+          peer.emit('stream', stream)
+          await expect(promise).toResolve()
+          promise = testForEvent(simplePeer, 'stream-update', { timeout: 100 })
+          peer.emit('data', JSON.stringify({
+            action: 'pauseProducer',
+            kind,
+            type
+          }))
+          await expect(promise).toResolve()
+          const data = await promise
+          expect(data.data.type).toEqual(type)
+          expect(data.data[field]).toBeTrue()
+          expect(simplePeer.remoteStreamInfo[stream.id][field]).toBeTrue()
+        }
+      })
+    })
+
+    describe('resumeProducer', () => {
+      test('Resuming producer sends \'resumeProducer\' event to all peers', async () => {
+        peers.forEach(peer => {
+          peer.send = jest.fn()
+        })
+        await simplePeer.resumeProducer(type, kind)
+        for (const peer of peers) {
+          expect(peer.send).toHaveBeenCalledTimes(1)
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
+            action: 'resumeProducer',
+            kind,
+            type
+          }))
+        }
+      })
+
+      test(`Resuming producer stores '${field}=false' in streamInfo`, async () => {
+        await simplePeer.resumeProducer(type, kind)
+        const infos = simplePeer._getStreamInfo(type)
+        for (const info of infos) {
+          expect(info[field]).toBeFalse()
+        }
+      })
+
+      test('Peers emit \'stream-update\' event when they receive \'resumeProducer\'', async () => {
+        for (const peer of peers) {
+          let promise = new Promise(resolve => {
+            peer.send = jest.fn().mockImplementation((data) => {
+              const json = JSON.parse(data)
+              const { nonce } = json
+              peer.emit('data', JSON.stringify({
+                action: 'stream-info',
+                nonce,
+                type,
+                kind,
+                videoPaused: true,
+                audioPaused: true
+              }))
+              resolve()
+            })
+          })
+          const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
+          peer.emit('stream', stream)
+          await expect(promise).toResolve()
+          promise = testForEvent(simplePeer, 'stream-update', { timeout: 100 })
+          peer.emit('data', JSON.stringify({
+            action: 'resumeProducer',
+            kind,
+            type
+          }))
+          await expect(promise).toResolve()
+          const data = await promise
+          expect(data.data.type).toEqual(type)
+          expect(data.data[field]).toBeFalse()
+          expect(simplePeer.remoteStreamInfo[stream.id][field]).toBeFalse()
+        }
+      })
     })
   })
 })

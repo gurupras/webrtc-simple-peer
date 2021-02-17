@@ -32,6 +32,7 @@ class SimplePeer extends AbstractWebRTC {
       gainMap: {},
       streams: [],
       streamInfo: {},
+      remoteStreamInfo: {},
       lock: new AsyncLock()
     })
   }
@@ -119,12 +120,55 @@ class SimplePeer extends AbstractWebRTC {
         case 'get-stream-info': {
           const { nonce, streamID } = json
           const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null } = streamInfo
+          const { type = null, stream } = streamInfo
+          let videoTrack
+          let audioTrack
+          if (stream) {
+            videoTrack = stream.getVideoTracks()[0]
+            audioTrack = stream.getAudioTracks()[0]
+          }
           peer.send(JSON.stringify({
             action: 'stream-info',
             nonce,
-            type
+            type,
+            videoPaused: videoTrack ? !videoTrack.enabled : undefined,
+            audioPaused: audioTrack ? !audioTrack.enabled : undefined
           }))
+          break
+        }
+        case 'pauseProducer': {
+          const { type, kind } = json
+          const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
+          if (!info) {
+            return
+          }
+          switch (kind) {
+            case 'video':
+              info.videoPaused = true
+              break
+            case 'audio':
+              info.audioPaused = true
+              break
+          }
+          this.emit('stream-update', { peer, metadata, data: info })
+          break
+        }
+        case 'resumeProducer': {
+          const { type, kind } = json
+          const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
+          if (!info) {
+            return
+          }
+          switch (kind) {
+            case 'video':
+              info.videoPaused = false
+              break
+            case 'audio':
+              info.audioPaused = false
+              break
+          }
+          this.emit('stream-update', { peer, metadata, data: info })
+          break
         }
       }
     })
@@ -150,7 +194,7 @@ class SimplePeer extends AbstractWebRTC {
               if (json.action === 'stream-info' && json.nonce === nonce) {
                 clearTimeout(timeout)
                 peer.off('data', once)
-                resolve(json.type)
+                resolve(json)
               }
             } catch (e) {
               self.emit('error', new BadDataError('', peer._id, data))
@@ -163,8 +207,10 @@ class SimplePeer extends AbstractWebRTC {
           streamID: stream.id
         }))
         try {
-          const type = await promise
-          await this.emit('stream', { peer, stream, metadata: { ...metadata, type } })
+          const json = await promise
+          const { type, videoPaused, audioPaused } = json
+          this.remoteStreamInfo[stream.id] = { peer, type, stream, videoPaused, audioPaused }
+          await this.emit('stream', { peer, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
         } catch (e) {
           this.emit('error', e)
         }
@@ -210,7 +256,16 @@ class SimplePeer extends AbstractWebRTC {
             // We need to add data to streamInfo before we call addStream
             // This is so that we have the necessary information to respond to the get-stream-info request
             // that we will receive shortly
-            this.streamInfo[clonedStreamWithGain.stream.id] = { type, stream: clonedStreamWithGain.stream }
+            const stream = clonedStreamWithGain.stream
+            const videoTrack = stream.getVideoTracks()[0]
+            const audioTrack = stream.getAudioTracks()[0]
+            this.streamInfo[clonedStreamWithGain.stream.id] = {
+              peer,
+              type,
+              stream: clonedStreamWithGain.stream,
+              videoPaused: videoTrack && !videoTrack.enabled,
+              audioPaused: audioTrack && !audioTrack.enabled
+            }
             await peer.addStream(clonedStreamWithGain.stream)
           }
           if (!newStream || newStream.getTracks().length === 0) {
@@ -235,11 +290,11 @@ class SimplePeer extends AbstractWebRTC {
   }
 
   async sendScreen (newStream, oldStream) {
-    this.sendStream(newStream, oldStream, 'screen')
+    return this.sendStream(newStream, oldStream, 'screen')
   }
 
   async sendWebcam (newStream, oldStream) {
-    this.sendStream(newStream, oldStream, 'webcam')
+    return this.sendStream(newStream, oldStream, 'webcam')
   }
 
   async stopScreen () {
@@ -258,8 +313,8 @@ class SimplePeer extends AbstractWebRTC {
     var src = ctx.createMediaStreamSource(new MediaStream([audioTrack]))
     var dst = ctx.createMediaStreamDestination()
     var gainNode = ctx.createGain()
-    gainNode.gain.value = 0.5;
-    [src, gainNode, dst].reduce((a, b) => a && a.connect(b))
+    gainNode.gain.value = 0.5
+    ;[src, gainNode, dst].reduce((a, b) => a && a.connect(b))
     stream.getVideoTracks().forEach(t => dst.stream.addTrack(t))
     return { gainNode, stream: dst.stream, type }
   }
@@ -294,6 +349,94 @@ class SimplePeer extends AbstractWebRTC {
       throw new Error('Must specify a stream type')
     }
     peer.send(JSON.stringify({ action: 'volume-control', volume, type }))
+  }
+
+  _getStreamInfo (filters, streamInfo = this.streamInfo) {
+    return Object.values(streamInfo).filter(entry => {
+      for (const [k, v] of Object.entries(filters)) {
+        if (entry[k] !== v) {
+          return false
+        }
+      }
+      return true
+    })
+  }
+
+  _getTrack (type, kind, info) {
+    info = info || this._getStreamInfo({ type })
+    if (!info) {
+      throw new Error(`Did not find producer of type=${type}`)
+    }
+    const { stream } = info
+    if (!stream) {
+      throw new Error(`Did not find stream of type=${type}`)
+    }
+    let track
+    switch (kind) {
+      case 'video':
+        track = stream.getVideoTracks()[0]
+        break
+      case 'audio':
+        track = stream.getAudioTracks()[0]
+        break
+    }
+    return track
+  }
+
+  pauseProducer (type, kind) {
+    const infos = this._getStreamInfo({ type })
+    if (infos.length === 0) {
+      throw new Error(`Did not find producer of type=${type}`)
+    }
+    infos.forEach(info => {
+      const track = this._getTrack(type, kind, info)
+      if (!track) {
+        return
+      }
+      track.enabled = false
+      switch (kind) {
+        case 'audio':
+          info.audioPaused = true
+          break
+        case 'video':
+          info.videoPaused = true
+          break
+      }
+    })
+    Object.values(this.peers).forEach(async peer => {
+      try {
+        await peer.send(JSON.stringify({ action: 'pauseProducer', kind, type }))
+      } catch (e) {
+      }
+    })
+  }
+
+  resumeProducer (type, kind) {
+    const infos = this._getStreamInfo({ type })
+    if (infos.length === 0) {
+      throw new Error(`Did not find producer of type=${type}`)
+    }
+    infos.forEach(info => {
+      const track = this._getTrack(type, kind, info)
+      if (!track) {
+        return
+      }
+      track.enabled = true
+      switch (kind) {
+        case 'audio':
+          info.audioPaused = false
+          break
+        case 'video':
+          info.videoPaused = false
+          break
+      }
+    })
+    Object.values(this.peers).forEach(async peer => {
+      try {
+        await peer.send(JSON.stringify({ action: 'resumeProducer', kind, type }))
+      } catch (e) {
+      }
+    })
   }
 
   destroy () {
