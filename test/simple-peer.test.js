@@ -65,7 +65,8 @@ function mockRequest (peer = new FakePeer(), metadata = generateFakeMetadata()) 
   return {
     initiator: peer._backendID,
     accept: jest.fn().mockReturnValue({ peer, metadata }),
-    reject: jest.fn()
+    reject: jest.fn(),
+    metadata
   }
 }
 
@@ -98,7 +99,7 @@ describe('SimplePeer', () => {
     expect(simplePeer.signalClient.discover).toHaveBeenCalledTimes(1)
   })
 
-  test('Does not connect to an already connected peer', async () => {
+  test('Reconnects to an already connected peer', async () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn()
@@ -107,12 +108,12 @@ describe('SimplePeer', () => {
     // Pretend to have connected to peers[1]
     simplePeer.discoveryIDToPeer[peers[1]] = {}
     await simplePeer.signalClient.emit('discover', peers)
-    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(1)
+    await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, simplePeer.options.peerOpts)
-    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(1)
+    await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
   })
 
-  test('Calls setupPeer for every unique request', async () => {
+  test('Calls setupPeer for every request', async () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn().mockImplementation((peer, metadata, discoveryID) => {
@@ -127,10 +128,10 @@ describe('SimplePeer', () => {
       await simplePeer.signalClient.emit('request', req)
     }
     await simplePeer.lock.acquire('discoveryIDToPeer', async () => {
-      expect(request1.accept).toHaveBeenCalledTimes(1)
+      expect(request1.accept).toHaveBeenCalledTimes(2)
       expect(request2.accept).toHaveBeenCalledTimes(1)
-      expect(request1.reject).toHaveBeenCalledTimes(1)
-      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+      expect(request1.reject).toHaveBeenCalledTimes(0)
+      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(3)
     })
   })
 
@@ -225,11 +226,20 @@ describe('SimplePeer', () => {
         let streamID
         let nonce
         let type
+        let expectedResult
         beforeEach(async () => {
           streamID = 'dummy'
           nonce = nanoid()
           type = 'dummy'
-          simplePeer.streamInfo[streamID] = { type }
+          const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
+          stream.getVideoTracks()[0].enabled = false
+          simplePeer.streamInfo[streamID] = { type, stream }
+
+          expectedResult = {
+            action: 'stream-info',
+            nonce,
+            type
+          }
         })
         test('Returns stream info for valid streamID', async () => {
           peer.send = jest.fn()
@@ -239,11 +249,7 @@ describe('SimplePeer', () => {
             streamID
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
-          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
-          }))
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expectedResult))
         })
 
         test('Returns proper nonce', async () => {
@@ -254,11 +260,7 @@ describe('SimplePeer', () => {
             streamID
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
-          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
-          }))
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expectedResult))
 
           // Now, try a different nonce to make sure it works
           peer.send.mockClear()
@@ -270,9 +272,8 @@ describe('SimplePeer', () => {
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
           expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
+            ...expectedResult,
+            nonce
           }))
         })
 
@@ -285,8 +286,7 @@ describe('SimplePeer', () => {
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
           expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
+            ...expectedResult,
             type: null
           }))
         })
