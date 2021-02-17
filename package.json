@@ -20,9 +20,10 @@
   "devDependencies": {
     "@babel/core": "^7.11.4",
     "@babel/preset-env": "^7.11.0",
-    "@gurupras/test-helpers": "^0.2.1",
+    "@gurupras/test-helpers": "^0.3.0",
     "@types/jest": "^26.0.10",
     "babel-jest": "^26.3.0",
+    "deepmerge": "^4.2.2",
     "eslint": "^7.7.0",
     "eslint-config-standard": "^14.1.1",
     "eslint-plugin-import": "^2.22.0",
