@@ -1,6 +1,6 @@
 {
   "name": "@gurupras/webrtc-simple-peer",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A simple-peer implementation of AbstractWebRTC",
   "main": "index.js",
   "scripts": {
