@@ -43,7 +43,7 @@ class SimplePeer extends AbstractWebRTC {
     const { userIdentifier } = this
     signalClient.on('discover', async (peerIDs = []) => {
       const { options: { peerOpts } } = this
-      console.log(`Found peers: ${JSON.stringify(peerIDs)}`)
+      // console.log(`Found peers: ${JSON.stringify(peerIDs)}`)
       for (const peerID of peerIDs) {
         const { peer, metadata } = await signalClient.connect(peerID, {
           userIdentifier
@@ -51,7 +51,7 @@ class SimplePeer extends AbstractWebRTC {
           ...peerOpts
         })
         const { userIdentifier: remoteUserIdentifier } = metadata
-        console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
+        // console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
         this.setupPeer(peer, metadata, remoteUserIdentifier)
       }
     })
@@ -73,7 +73,7 @@ class SimplePeer extends AbstractWebRTC {
       }, {
         ...peerOpts
       })
-      console.log(`[simple-peer]: Accepted request: ${peer._id}`)
+      // console.log(`[simple-peer]: Accepted request: ${peer._id}`)
       this.setupPeer(peer, metadata, remoteUserIdentifier)
     })
   }
@@ -178,7 +178,7 @@ class SimplePeer extends AbstractWebRTC {
     }
 
     const closePeer = () => {
-      console.log(`Closing peer: ${peer._id}`)
+      // console.log(`Closing peer: ${peer._id}`)
       delete this.peers[peer._id]
       delete this.gainMap[peer._id]
       delete this.discoveryIDToPeer[discoveryID]
