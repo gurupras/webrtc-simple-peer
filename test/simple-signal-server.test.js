@@ -48,13 +48,15 @@ describe('SimpleSignalServer', () => {
   describe('initialize', () => {
     let server
     let peers
+    let allPeers
     let selfID
     beforeEach(() => {
       peers = [...Array(5)].map(x => nanoid())
       selfID = nanoid()
+      allPeers = [...peers, selfID]
       server = new SimpleSignalServer({
         getPeerIDFromSocket: jest.fn().mockImplementation(async () => selfID),
-        getPeersOfSocket: jest.fn().mockImplementation(async () => peers)
+        getPeersOfSocket: jest.fn().mockImplementation(async () => allPeers)
       }, () => mockSignalServer)
       server.initialize()
     })
@@ -66,17 +68,15 @@ describe('SimpleSignalServer', () => {
         await testForEvent(request.socket, 'discover')
         expect(server.getPeerIDFromSocket).toHaveBeenCalledWith(request.socket)
         expect(server.getPeersOfSocket).toHaveBeenCalledWith(request.socket)
-        expect(request.discover).toHaveBeenCalledWith(selfID, peers)
+        expect(request.discover).toHaveBeenCalledWith(peers)
       })
       test('Properly filters out caller\'s peerID from peers', async () => {
         const request = createMockRequest()
-        const badPeers = [...peers, selfID]
-        server.getPeersOfSocket = jest.fn().mockImplementation(async () => badPeers)
         expect(() => mockSignalServer.emit('discover', request)).not.toThrow()
         await testForEvent(request.socket, 'discover')
         expect(server.getPeerIDFromSocket).toHaveBeenCalledWith(request.socket)
         expect(server.getPeersOfSocket).toHaveBeenCalledWith(request.socket)
-        expect(request.discover).toHaveBeenCalledWith(selfID, peers)
+        expect(request.discover).toHaveBeenCalledWith(peers)
       })
     })
     describe('Event: disconnect', () => {

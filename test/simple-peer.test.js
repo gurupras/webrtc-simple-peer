@@ -65,7 +65,8 @@ function mockRequest (peer = new FakePeer(), metadata = generateFakeMetadata()) 
   return {
     initiator: peer._backendID,
     accept: jest.fn().mockReturnValue({ peer, metadata }),
-    reject: jest.fn()
+    reject: jest.fn(),
+    metadata
   }
 }
 
@@ -225,11 +226,20 @@ describe('SimplePeer', () => {
         let streamID
         let nonce
         let type
+        let expectedResult
         beforeEach(async () => {
           streamID = 'dummy'
           nonce = nanoid()
           type = 'dummy'
-          simplePeer.streamInfo[streamID] = { type }
+          const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
+          stream.getVideoTracks()[0].enabled = false
+          simplePeer.streamInfo[streamID] = { type, stream }
+
+          expectedResult = {
+            action: 'stream-info',
+            nonce,
+            type
+          }
         })
         test('Returns stream info for valid streamID', async () => {
           peer.send = jest.fn()
@@ -239,11 +249,7 @@ describe('SimplePeer', () => {
             streamID
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
-          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
-          }))
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expectedResult))
         })
 
         test('Returns proper nonce', async () => {
@@ -254,11 +260,7 @@ describe('SimplePeer', () => {
             streamID
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
-          expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
-          }))
+          expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expectedResult))
 
           // Now, try a different nonce to make sure it works
           peer.send.mockClear()
@@ -270,9 +272,8 @@ describe('SimplePeer', () => {
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
           expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type
+            ...expectedResult,
+            nonce
           }))
         })
 
@@ -285,8 +286,7 @@ describe('SimplePeer', () => {
           }))
           expect(peer.send).toHaveBeenCalledTimes(1)
           expect(peer.send).toHaveBeenCalledWith(JSON.stringify({
-            action: 'stream-info',
-            nonce,
+            ...expectedResult,
             type: null
           }))
         })
