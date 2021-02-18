@@ -172,49 +172,32 @@ class SimplePeer extends AbstractWebRTC {
         }
       }
     })
-    var events = ['connect', 'close', 'signal', 'destroy', 'error', 'data', 'track']
+    var events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
     events.forEach(evt => {
       peer.on(evt, data => {
         // console.log(`[simple-peer]: ${peer._id}: ${evt}`)
         this.emit(evt, { peer, metadata, data })
       })
     }, this)
+    // Track is special because it has a second argument
+    peer.on('track', async (track, stream) => {
+      try {
+        const info = await this._getRemoteStreamInfo(peer, stream)
+        const { type, videoPaused, audioPaused } = info
+        await this.emit('track', { peer, track, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
+      } catch (e) {
+        this.emit('error', e)
+      }
+    })
 
     peer.on('stream', async stream => {
-      await this.lock.acquire('stream-event', async () => {
-        // We need to find out what type of stream this is
-        const { options: { requestTimeoutMS } } = this
-        const nonce = nanoid()
-        const promise = new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer._id)), requestTimeoutMS)
-          const self = this
-          peer.on('data', function once (data) {
-            try {
-              const json = JSON.parse(data)
-              if (json.action === 'stream-info' && json.nonce === nonce) {
-                clearTimeout(timeout)
-                peer.off('data', once)
-                resolve(json)
-              }
-            } catch (e) {
-              self.emit('error', new BadDataError('', peer._id, data))
-            }
-          })
-        })
-        peer.send(JSON.stringify({
-          action: 'get-stream-info',
-          nonce,
-          streamID: stream.id
-        }))
-        try {
-          const json = await promise
-          const { type, videoPaused, audioPaused } = json
-          this.remoteStreamInfo[stream.id] = { peer, type, stream, videoPaused, audioPaused }
-          await this.emit('stream', { peer, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
-        } catch (e) {
-          this.emit('error', e)
-        }
-      })
+      try {
+        const info = await this._getRemoteStreamInfo(peer, stream)
+        const { type, videoPaused, audioPaused } = info
+        await this.emit('stream', { peer, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
+      } catch (e) {
+        this.emit('error', e)
+      }
     })
 
     const clonedStreams = this.cloneAllStreams()
@@ -232,6 +215,40 @@ class SimplePeer extends AbstractWebRTC {
     peer.on('destroy', closePeer)
     // console.log(`peer: ${peer._id} has been set up`)
     this.peers[peer._id] = peer
+  }
+
+  async _getRemoteStreamInfo (peer, stream) {
+    const info = await this.lock.acquire('stream-event', async () => {
+      // We need to find out what type of stream this is
+      const { options: { requestTimeoutMS } } = this
+      const nonce = nanoid()
+      const promise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer._id)), requestTimeoutMS)
+        const self = this
+        peer.on('data', function once (data) {
+          try {
+            const json = JSON.parse(data)
+            if (json.action === 'stream-info' && json.nonce === nonce) {
+              clearTimeout(timeout)
+              peer.off('data', once)
+              resolve(json)
+            }
+          } catch (e) {
+            self.emit('error', new BadDataError('', peer._id, data))
+          }
+        })
+      })
+      peer.send(JSON.stringify({
+        action: 'get-stream-info',
+        nonce,
+        streamID: stream.id
+      }))
+      const json = await promise
+      const { type, videoPaused, audioPaused } = json
+      this.remoteStreamInfo[stream.id] = { peer, type, stream, videoPaused, audioPaused }
+      return json
+    })
+    return info
   }
 
   async sendStream (newStream, oldStream, type) {
