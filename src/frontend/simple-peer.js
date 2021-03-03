@@ -120,12 +120,15 @@ class SimplePeer extends AbstractWebRTC {
         case 'get-stream-info': {
           const { nonce, streamID } = json
           const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null, stream } = streamInfo
+          const { type = null, stream, originalStream } = streamInfo
           let videoTrack
           let audioTrack
           if (stream) {
             videoTrack = stream.getVideoTracks()[0]
-            audioTrack = stream.getAudioTracks()[0]
+          }
+          // We get audio enabled state from the original stream since the clonedStream will always have enabled = true
+          if (originalStream) {
+            audioTrack = originalStream.getAudioTracks()[0]
           }
           peer.send(JSON.stringify({
             action: 'stream-info',
@@ -281,7 +284,10 @@ class SimplePeer extends AbstractWebRTC {
               type,
               stream: clonedStreamWithGain.stream,
               videoPaused: videoTrack && !videoTrack.enabled,
-              audioPaused: audioTrack && !audioTrack.enabled
+              audioPaused: audioTrack && !audioTrack.enabled,
+              get originalStream () {
+                return newStream
+              }
             }
             await peer.addStream(clonedStreamWithGain.stream)
           }
