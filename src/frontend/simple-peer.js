@@ -278,16 +278,14 @@ class SimplePeer extends AbstractWebRTC {
             // that we will receive shortly
             const stream = clonedStreamWithGain.stream
             const videoTrack = stream.getVideoTracks()[0]
-            const audioTrack = stream.getAudioTracks()[0]
+            const audioTrack = newStream.getAudioTracks()[0]
             this.streamInfo[clonedStreamWithGain.stream.id] = {
               peer,
               type,
               stream: clonedStreamWithGain.stream,
               videoPaused: videoTrack && !videoTrack.enabled,
               audioPaused: audioTrack && !audioTrack.enabled,
-              get originalStream () {
-                return newStream
-              }
+              originalStream: clonedStreamWithGain.originalStream
             }
             await peer.addStream(clonedStreamWithGain.stream)
           }
@@ -339,7 +337,7 @@ class SimplePeer extends AbstractWebRTC {
     gainNode.gain.value = 0.5
     ;[src, gainNode, dst].reduce((a, b) => a && a.connect(b))
     stream.getVideoTracks().forEach(t => dst.stream.addTrack(t))
-    return { gainNode, stream: dst.stream, type }
+    return { gainNode, stream: dst.stream, type, originalStream: stream }
   }
 
   cloneAllStreams () {
@@ -357,9 +355,9 @@ class SimplePeer extends AbstractWebRTC {
   registerClonedStreams (clonedStreams, peerID) {
     this.gainMap[peerID].push(...clonedStreams)
     for (const entry of clonedStreams) {
-      const { stream, type } = entry
+      const { stream } = entry
       const { id } = stream
-      this.streamInfo[id] = { type, stream }
+      this.streamInfo[id] = entry
     }
   }
 

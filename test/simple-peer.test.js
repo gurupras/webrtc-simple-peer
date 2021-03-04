@@ -142,6 +142,7 @@ describe('SimplePeer', () => {
 
   describe('setupPeer', () => {
     let peer
+    /** @type SimplePeer */
     let simplePeer
     beforeEach(async () => {
       simplePeer = create({ requestTimeoutMS: 50 })
@@ -233,12 +234,14 @@ describe('SimplePeer', () => {
         let type
         let expectedResult
         beforeEach(async () => {
-          streamID = 'dummy'
           nonce = nanoid()
           type = 'dummy'
           const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
           stream.getVideoTracks()[0].enabled = false
-          simplePeer.streamInfo[streamID] = { type, stream }
+          simplePeer.streamInfo[stream.id] = { type, stream }
+          const clonedStream = simplePeer.cloneStreamWithGain(stream, type)
+          simplePeer.registerClonedStreams([clonedStream], peer._id)
+          streamID = clonedStream.stream.id
 
           expectedResult = {
             action: 'stream-info',
