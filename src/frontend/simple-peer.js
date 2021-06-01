@@ -84,50 +84,59 @@ class SimplePeer extends AbstractWebRTC {
   }
 
   setupPeer (peer, metadata, discoveryID) {
-    this.gainMap[peer._id] = []
+    peer.peerID = discoveryID // Expose a standard UID
+    this.gainMap[peer.peerID] = []
     this.discoveryIDToPeer[discoveryID] = peer
-    peer.peerID = peer._id // Expose a standard UID
     peer.metadata = metadata
-    peer.on('data', data => {
+    peer.on('data', async data => {
       let json
       try {
         json = JSON.parse(data)
       } catch (e) {
-        return this.emit('error', new BadDataError('', peer._id, data))
+        return this.emit('error', new BadDataError('', peer.peerID, data))
       }
       switch (json.action) {
         case 'volume-control': {
           const { volume, type } = json
-          // console.log(`Changing volume...peer=${peer._id} userIdentifier=${metadata.userIdentifier} volume=${volume}`)
-          const peerGainMap = this.gainMap[peer._id]
+          // console.log(`Changing volume...peer=${peer.peerID} userIdentifier=${metadata.userIdentifier} volume=${volume}`)
+          const peerGainMap = this.gainMap[peer.peerID]
           if (!peerGainMap) {
-            return this.emit('error', new BadDataError(json.action, peer._id))
+            return this.emit('error', new BadDataError(json.action, peer.peerID))
           }
-          const clonedStreamWithGain = this.gainMap[peer._id].find(entry => entry.type === type)
+          const clonedStreamWithGain = this.gainMap[peer.peerID].find(entry => entry.type === type)
           if (clonedStreamWithGain && clonedStreamWithGain.gainNode) {
             clonedStreamWithGain.gainNode.gain.value = volume
           }
           break
         }
-        case 'no-stream':
+        case 'no-stream': {
+          const { type } = json
+          const remoteStreamIDs = peer._remoteStreams.map(x => x.id)
           peer._remoteStreams.splice(0, peer._remoteStreams.length)
+          for (const remoteStreamID of remoteStreamIDs) {
+            const entry = this.remoteStreamInfo[remoteStreamID]
+            if (!entry || entry.type !== type) {
+              continue
+            }
+            delete this.remoteStreamInfo[remoteStreamID]
+          }
           this.emit('no-stream', {
             peer,
             metadata,
             data: undefined
           })
           break
+        }
         case 'get-stream-info': {
           const { nonce, streamID } = json
           const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null, stream, originalStream } = streamInfo
+          const { type = null, originalStream } = streamInfo
           let videoTrack
           let audioTrack
-          if (stream) {
-            videoTrack = stream.getVideoTracks()[0]
-          }
-          // We get audio enabled state from the original stream since the clonedStream will always have enabled = true
+          // We get audio and video enabled state from the original stream since the clonedStream will always have enabled = true
+          // and since we clone the video track
           if (originalStream) {
+            videoTrack = originalStream.getVideoTracks()[0]
             audioTrack = originalStream.getAudioTracks()[0]
           }
           peer.send(JSON.stringify({
@@ -143,6 +152,7 @@ class SimplePeer extends AbstractWebRTC {
           const { type, kind } = json
           const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
           if (!info) {
+            console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
             return
           }
           switch (kind) {
@@ -160,6 +170,7 @@ class SimplePeer extends AbstractWebRTC {
           const { type, kind } = json
           const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
           if (!info) {
+            console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
             return
           }
           switch (kind) {
@@ -173,12 +184,63 @@ class SimplePeer extends AbstractWebRTC {
           this.emit('stream-update', { peer, metadata, data: info })
           break
         }
+        case 'pauseConsumer': {
+          await this.lock.acquire([peer.peerID], async () => {
+            const { type, kind } = json
+            const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+            if (!info) {
+              console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
+              return
+            }
+            const track = this._getTrack(type, kind, info)
+            if (!track) {
+              return
+            }
+            track.enabled = false
+            switch (kind) {
+              case 'audio':
+                info.consumerAudioPaused = true
+                break
+              case 'video':
+                info.consumerVideoPaused = true
+                break
+            }
+            this.emit('stream-update', { peer, metadata, data: info })
+          })
+          break
+        }
+        case 'resumeConsumer': {
+          await this.lock.acquire([peer.peerID], async () => {
+            const { type, kind } = json
+            const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+            if (!info) {
+              console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
+              return
+            }
+            const track = this._getTrack(type, kind, info)
+            if (!track) {
+              return
+            }
+            switch (kind) {
+              case 'audio':
+                info.consumerAudioPaused = false
+                track.enabled = !info.audioPaused
+                break
+              case 'video':
+                info.consumerVideoPaused = false
+                track.enabled = !info.videoPaused
+                break
+            }
+            this.emit('stream-update', { peer, metadata, data: info })
+          })
+          break
+        }
       }
     })
     var events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
     events.forEach(evt => {
       peer.on(evt, data => {
-        // console.log(`[simple-peer]: ${peer._id}: ${evt}`)
+        // console.log(`[simple-peer]: ${peer.peerID}: ${evt}`)
         this.emit(evt, { peer, metadata, data })
       })
     }, this)
@@ -204,20 +266,20 @@ class SimplePeer extends AbstractWebRTC {
     })
 
     const clonedStreams = this.cloneAllStreams()
-    this.registerClonedStreams(clonedStreams, peer._id)
+    this.registerClonedStreams(clonedStreams, peer.peerID)
     for (const entry of clonedStreams) {
       peer.addStream(entry.stream)
     }
 
     const closePeer = () => {
-      // console.log(`Closing peer: ${peer._id}`)
-      delete this.peers[peer._id]
-      delete this.gainMap[peer._id]
+      // console.log(`Closing peer: ${peer.peerID}`)
+      delete this.peers[peer.peerID]
+      delete this.gainMap[peer.peerID]
       delete this.discoveryIDToPeer[discoveryID]
     }
     peer.on('destroy', closePeer)
-    // console.log(`peer: ${peer._id} has been set up`)
-    this.peers[peer._id] = peer
+    // console.log(`peer: ${peer.peerID} has been set up`)
+    this.peers[peer.peerID] = peer
   }
 
   async _getRemoteStreamInfo (peer, stream) {
@@ -226,7 +288,7 @@ class SimplePeer extends AbstractWebRTC {
       const { options: { requestTimeoutMS } } = this
       const nonce = nanoid()
       const promise = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer._id)), requestTimeoutMS)
+        const timeout = setTimeout(() => reject(new RequestTimedOutError('get-stream-info', peer.peerID)), requestTimeoutMS)
         const self = this
         peer.on('data', function once (data) {
           try {
@@ -237,7 +299,7 @@ class SimplePeer extends AbstractWebRTC {
               resolve(json)
             }
           } catch (e) {
-            self.emit('error', new BadDataError('', peer._id, data))
+            self.emit('error', new BadDataError('', peer.peerID, data))
           }
         })
       })
@@ -258,9 +320,9 @@ class SimplePeer extends AbstractWebRTC {
     if (this.signalClient) {
       await this.lock.acquire('sendStream', async () => {
         for (const peer of Object.values(this.signalClient.peers())) {
-          const peerStreams = this.gainMap[peer._id]
+          const peerStreams = this.gainMap[peer.peerID]
           if (!peerStreams) {
-            console.warn(`Failed to find peer streams for peerID: ${peer._id}`)
+            console.warn(`Failed to find peer streams for peerID: ${peer.peerID}`)
             continue
           }
           const oldClonedStream = peerStreams.find(e => e.type === type)
@@ -285,13 +347,16 @@ class SimplePeer extends AbstractWebRTC {
               stream: clonedStreamWithGain.stream,
               videoPaused: videoTrack && !videoTrack.enabled,
               audioPaused: audioTrack && !audioTrack.enabled,
+              consumerVideoPaused: true,
+              consumerAudioPaused: true,
               originalStream: clonedStreamWithGain.originalStream
             }
             await peer.addStream(clonedStreamWithGain.stream)
           }
           if (!newStream || newStream.getTracks().length === 0) {
             peer.send(JSON.stringify({
-              action: 'no-stream'
+              action: 'no-stream',
+              type
             }))
           }
         }
@@ -326,8 +391,20 @@ class SimplePeer extends AbstractWebRTC {
     if (!stream) {
       return {}
     }
+    const originalVideoTracks = [...stream.getVideoTracks()]
+    const clonedVideoTracks = originalVideoTracks.map(t => {
+      const clone = t.clone()
+      clone.enabled = t.enabled
+      const stop = t.stop.bind(t)
+      t.stop = () => {
+        stop()
+        clone.stop()
+      }
+      t.addEventListener('ended', () => { clone.stop() })
+      return clone
+    })
     if (stream.getAudioTracks().length === 0) {
-      return { stream: new MediaStream(stream), type }
+      return { stream: new MediaStream(clonedVideoTracks), type }
     }
     const audioTrack = stream.getAudioTracks()[0]
     var ctx = new AudioContext()
@@ -336,7 +413,7 @@ class SimplePeer extends AbstractWebRTC {
     var gainNode = ctx.createGain()
     gainNode.gain.value = 0.5
     ;[src, gainNode, dst].reduce((a, b) => a && a.connect(b))
-    stream.getVideoTracks().forEach(t => dst.stream.addTrack(t))
+    clonedVideoTracks.forEach(t => dst.stream.addTrack(t))
     return { gainNode, stream: dst.stream, type, originalStream: stream }
   }
 
@@ -404,7 +481,7 @@ class SimplePeer extends AbstractWebRTC {
     return track
   }
 
-  pauseProducer (type, kind) {
+  _producerRequest (type, kind, action, pausedState) {
     const infos = this._getStreamInfo({ type })
     if (infos.length === 0) {
       throw new Error(`Did not find producer of type=${type}`)
@@ -414,50 +491,56 @@ class SimplePeer extends AbstractWebRTC {
       if (!track) {
         return
       }
-      track.enabled = false
       switch (kind) {
         case 'audio':
-          info.audioPaused = true
+          info.audioPaused = pausedState
+          track.enabled = !info.audioPaused && !info.consumerAudioPaused
           break
         case 'video':
-          info.videoPaused = true
+          info.videoPaused = pausedState
+          track.enabled = !info.videoPaused && !info.consumerVideoPaused
           break
       }
     })
     Object.values(this.peers).forEach(async peer => {
       try {
-        await peer.send(JSON.stringify({ action: 'pauseProducer', kind, type }))
+        await peer.send(JSON.stringify({ action, kind, type }))
       } catch (e) {
       }
     })
   }
 
+  pauseProducer (type, kind) {
+    return this._producerRequest(type, kind, 'pauseProducer', true)
+  }
+
   resumeProducer (type, kind) {
-    const infos = this._getStreamInfo({ type })
-    if (infos.length === 0) {
-      throw new Error(`Did not find producer of type=${type}`)
-    }
-    infos.forEach(info => {
-      const track = this._getTrack(type, kind, info)
-      if (!track) {
-        return
+    return this._producerRequest(type, kind, 'resumeProducer', false)
+  }
+
+  async _consumerRequest (remotePeerID, type, kind, action) {
+    await this.lock.acquire([remotePeerID], async () => {
+      const infos = this._getStreamInfo({ type }, this.remoteStreamInfo)
+      if (infos.length === 0) {
+        throw new Error(`Did not find consumer of type=${type}`)
       }
-      track.enabled = true
-      switch (kind) {
-        case 'audio':
-          info.audioPaused = false
-          break
-        case 'video':
-          info.videoPaused = false
-          break
+      const { peers: { [remotePeerID]: peer } } = this
+      if (!peer) {
+        throw new Error(`Did not find peer with peerID '${remotePeerID}'`)
       }
-    })
-    Object.values(this.peers).forEach(async peer => {
       try {
-        await peer.send(JSON.stringify({ action: 'resumeProducer', kind, type }))
+        await peer.send(JSON.stringify({ action, kind, type }))
       } catch (e) {
       }
     })
+  }
+
+  pauseConsumer (type, kind, remotePeerID) {
+    return this._consumerRequest(remotePeerID, type, kind, 'pauseConsumer')
+  }
+
+  resumeConsumer (type, kind, remotePeerID) {
+    return this._consumerRequest(remotePeerID, type, kind, 'resumeConsumer')
   }
 
   destroy () {
