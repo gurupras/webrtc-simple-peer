@@ -27,11 +27,6 @@ class SimpleSignalServer {
       const { socket } = request
       const peerID = await getPeerIDFromSocket(socket)
       const peers = await getPeersOfSocket(socket)
-      // Remove peerID from peers if it exists
-      const idx = peers.indexOf(peerID)
-      if (idx >= 0) {
-        peers.splice(idx, 1)
-      }
       log.info(`Sending discovery to: ${peerID} with peers=${JSON.stringify(peers)}`)
       request.discover(peers)
     })

@@ -5,13 +5,13 @@ import { testForEvent } from '@gurupras/test-helpers'
 
 const dummyFn = () => {}
 
-const createMockRequest = () => {
+const createMockRequest = (selfID) => {
   const result = {
     socket: new Emittery(),
     forward: jest.fn(),
     discover: jest.fn().mockImplementation(() => result.socket.emit('discover'))
   }
-  result.socket.id = nanoid()
+  result.socket.id = selfID || nanoid()
   return result
 }
 
@@ -56,22 +56,16 @@ describe('SimpleSignalServer', () => {
       allPeers = [...peers, selfID]
       server = new SimpleSignalServer({
         getPeerIDFromSocket: jest.fn().mockImplementation(async () => selfID),
-        getPeersOfSocket: jest.fn().mockImplementation(async () => allPeers)
+        getPeersOfSocket: jest.fn().mockImplementation(async () => {
+          return peers
+        })
       }, () => mockSignalServer)
       server.initialize()
     })
 
     describe('Event: discover', () => {
       test('Discovers peers of socket', async () => {
-        const request = createMockRequest()
-        expect(() => mockSignalServer.emit('discover', request)).not.toThrow()
-        await testForEvent(request.socket, 'discover')
-        expect(server.getPeerIDFromSocket).toHaveBeenCalledWith(request.socket)
-        expect(server.getPeersOfSocket).toHaveBeenCalledWith(request.socket)
-        expect(request.discover).toHaveBeenCalledWith(peers)
-      })
-      test('Properly filters out caller\'s peerID from peers', async () => {
-        const request = createMockRequest()
+        const request = createMockRequest(selfID)
         expect(() => mockSignalServer.emit('discover', request)).not.toThrow()
         await testForEvent(request.socket, 'discover')
         expect(server.getPeerIDFromSocket).toHaveBeenCalledWith(request.socket)
