@@ -1,6 +1,6 @@
 import Emittery from 'emittery'
 import { nanoid } from 'nanoid'
-import { testForEvent, testForNoEvent, FakeAudioContext, FakeMediaStream } from '@gurupras/test-helpers'
+import { testForEvent, FakeAudioContext, FakeMediaStream } from '@gurupras/test-helpers'
 import { SimplePeer, BadDataError, RequestTimedOutError } from '../index'
 import testImplementation from '@gurupras/abstract-webrtc/test/test-implementation'
 
@@ -35,6 +35,7 @@ class FakePeer {
     new Emittery().bindMethods(this)
     this._id = _id
     this.peerID = peerID
+    this.streamMap = new Map()
     this._backendID = nanoid()
     this._remoteStreams = []
   }
@@ -122,7 +123,6 @@ describe('SimplePeer', () => {
     const simplePeer = create()
     await simplePeer.setup()
     simplePeer.setupPeer = jest.fn().mockImplementation((peer, metadata, discoveryID) => {
-      simplePeer.gainMap[peer.peerID] = []
       simplePeer.discoveryIDToPeer[discoveryID] = peer
     })
 
@@ -159,46 +159,6 @@ describe('SimplePeer', () => {
         peer.emit('data', 'test')
         await expect(promise).resolves.toEqual(new BadDataError('', peer.peerID, 'test'))
       })
-      describe('volume-control', () => {
-        test('Emits error on no gainMap entry', async () => {
-          delete simplePeer.gainMap[peer.peerID]
-          const promise = testForEvent(simplePeer, 'error')
-          peer.emit('data', JSON.stringify({
-            action: 'volume-control'
-          }))
-          await expect(promise).resolves.toEqual(new BadDataError('volume-control', peer.peerID))
-        })
-        test('Silently ignores request to invalid streams', async () => {
-          simplePeer.gainMap[peer.peerID] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
-          let promise = testForNoEvent(simplePeer, 'error', { timeout: 100 })
-          await peer.emit('data', JSON.stringify({
-            action: 'volume-control',
-            type: 'display',
-            volume: 0.3
-          }))
-          await expect(promise).toResolve()
-          expect(simplePeer.gainMap[peer.peerID][0].gainNode.gain.value).toEqual(1.0)
-
-          // Now, try a stream with no gainNode
-          simplePeer.gainMap[peer.peerID] = [{ type: 'screen' }]
-          promise = testForNoEvent(simplePeer, 'error')
-          await peer.emit('data', JSON.stringify({
-            action: 'volume-control',
-            type: 'screen',
-            volume: 0.3
-          }))
-          await expect(promise).toResolve()
-        })
-        test('Properly changes gain value on valid request', async () => {
-          simplePeer.gainMap[peer.peerID] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
-          await peer.emit('data', JSON.stringify({
-            action: 'volume-control',
-            type: 'screen',
-            volume: 0.3
-          }))
-          expect(simplePeer.gainMap[peer.peerID][0].gainNode.gain.value).toEqual(0.3)
-        })
-      })
       describe('no-stream', () => {
         test('Clears out all of the peer\'s remote streams', async () => {
           const type = 'webcam'
@@ -233,12 +193,10 @@ describe('SimplePeer', () => {
 
       describe('destroy', () => {
         test('Removes entry from \'peers\'', async () => {
-          simplePeer.gainMap[peer.peerID] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
           const promise = testForEvent(simplePeer, 'destroy')
           await peer.emit('destroy')
           await expect(promise).toResolve()
           expect(simplePeer.peers[peer.peerID]).toBeUndefined()
-          expect(simplePeer.gainMap[peer.peerID]).toBeUndefined()
         })
       })
 
@@ -253,9 +211,7 @@ describe('SimplePeer', () => {
           const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
           stream.getVideoTracks()[0].enabled = false
           simplePeer.streamInfo[stream.id] = { type, stream }
-          const clonedStream = simplePeer.cloneStreamWithGain(stream, type)
-          simplePeer.registerClonedStreams([clonedStream], peer.peerID)
-          streamID = clonedStream.stream.id
+          streamID = stream.id
 
           expectedResult = {
             action: 'stream-info',
@@ -371,14 +327,6 @@ describe('SimplePeer', () => {
       await simplePeer.setupPeer(peer, generateFakeMetadata(), peer.peerID)
       expect(peer.addStream).toHaveBeenCalledTimes(simplePeer.streams.length)
     })
-
-    test('Creates gainMap entry for every peer', async () => {
-      const peers = [...Array(5)].map(x => new FakePeer())
-      for (const peer of peers) {
-        await simplePeer.setupPeer(peer, generateFakeMetadata(), peer.peerID)
-        expect(simplePeer.gainMap[peer.peerID]).toBeArrayOfSize(0)
-      }
-    })
   })
 
   describe('destroy', () => {
@@ -451,7 +399,7 @@ describe('SimplePeer', () => {
       await simplePeer.setup()
     })
 
-    test('newStream is still saved if signalClient is uninitialized', async () => {
+    test('New stream is still saved if signalClient is uninitialized', async () => {
       simplePeer.signalClient = undefined
       const newStream = new FakeMediaStream()
       simplePeer.sendStream(newStream, new FakeMediaStream(), 'screen')
@@ -502,22 +450,12 @@ describe('SimplePeer', () => {
           peer.peerID = nanoid()
           ret.push(peer)
           peers[peer.peerID] = peer
-          simplePeer.gainMap[peer.peerID] = []
           // Mocks
           peer.addStream = jest.fn()
           peer.send = jest.fn()
           peer.removeStream = jest.fn()
         })
         return ret
-      }
-
-      function copyGainMap () {
-        const result = {}
-        for (const entry of Object.entries(simplePeer.gainMap)) {
-          const [key, value] = entry
-          result[key] = [...value]
-        }
-        return result
       }
 
       beforeEach(() => {
@@ -541,13 +479,11 @@ describe('SimplePeer', () => {
         for (const peer of peers) {
           expect(peer.addStream).toHaveBeenCalledTimes(1)
         }
-        // We need to create a copy of the current gainMap since sendStream will modify it in-place
-        const gainMap = copyGainMap()
         // Now, remove it and ensure that removeStream was called
         await simplePeer.sendStream(new FakeMediaStream(), newStream, 'screen')
         for (const peer of peers) {
           expect(peer.removeStream).toHaveBeenCalledTimes(1)
-          expect(peer.removeStream).toHaveBeenCalledWith(gainMap[peer.peerID][0].stream)
+          expect(peer.removeStream).toHaveBeenCalledWith(peer.streamMap.get(newStream))
         }
       })
       test('Sends \'no-stream\' signal if there are no tracks/streams available', async () => {
@@ -610,7 +546,6 @@ describe('SimplePeer', () => {
     let peer
     beforeEach(async () => {
       peer = new FakePeer()
-      peer.send = jest.fn()
       simplePeer = create({ requestTimeoutMS: 50 })
       await simplePeer.setup()
       await simplePeer.setupPeer(peer, generateFakeMetadata(), peer.peerID)
@@ -619,19 +554,20 @@ describe('SimplePeer', () => {
       expect(() => simplePeer.updateVolume(0.3, 'bad')).toThrow()
     })
     test('Throw error if no stream type specified', async () => {
-      simplePeer.gainMap[peer.peerID] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
       expect(() => simplePeer.updateVolume(0.3, peer.peerID)).toThrow()
     })
-    test('Sends volume data in the right format', async () => {
-      simplePeer.gainMap[peer.peerID] = [{ type: 'screen', gainNode: { gain: { value: 1.0 } } }]
+    test('Updates volume of stream', async () => {
       const volume = 0.3
-      simplePeer.updateVolume(volume, peer.peerID, 'screen')
-      const expected = {
-        action: 'volume-control',
-        volume,
-        type: 'screen'
-      }
-      expect(peer.send).toHaveBeenCalledWith(JSON.stringify(expected))
+      const type = 'screen'
+      // Create a fake stream
+      const stream = new FakeMediaStream(null, { numAudioTracks: 1 })
+      // Mock the stream.volume function
+      stream.volume = jest.fn()
+      // Set up the remoteStreamInfo so the updateVolume method finds this stream
+      simplePeer.remoteStreamInfo[stream.id] = { peer, type, stream }
+
+      simplePeer.updateVolume(volume, peer.peerID, type)
+      expect(stream.volume).toHaveBeenCalledWith(volume)
     })
   })
 

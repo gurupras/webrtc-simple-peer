@@ -34,7 +34,7 @@
     "jest-extended": "^0.11.5"
   },
   "dependencies": {
-    "@gurupras/abstract-webrtc": "^0.2.1",
+    "@gurupras/abstract-webrtc": "^0.3.0",
     "async-lock": "^1.2.4",
     "debug-logger": "^0.4.1",
     "deepmerge": "^4.2.2",

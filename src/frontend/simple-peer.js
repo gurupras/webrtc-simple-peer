@@ -29,7 +29,6 @@ class SimplePeer extends AbstractWebRTC {
     Object.assign(this, {
       peers: {},
       discoveryIDToPeer: {},
-      gainMap: {},
       streams: [],
       streamInfo: {},
       remoteStreamInfo: {},
@@ -85,8 +84,8 @@ class SimplePeer extends AbstractWebRTC {
 
   setupPeer (peer, metadata, discoveryID) {
     peer.peerID = discoveryID // Expose a standard UID
-    this.gainMap[peer.peerID] = []
     this.discoveryIDToPeer[discoveryID] = peer
+    peer.streamMap = new Map()
     peer.metadata = metadata
     peer.on('data', async data => {
       let json
@@ -96,19 +95,6 @@ class SimplePeer extends AbstractWebRTC {
         return this.emit('error', new BadDataError('', peer.peerID, data))
       }
       switch (json.action) {
-        case 'volume-control': {
-          const { volume, type } = json
-          // console.log(`Changing volume...peer=${peer.peerID} userIdentifier=${metadata.userIdentifier} volume=${volume}`)
-          const peerGainMap = this.gainMap[peer.peerID]
-          if (!peerGainMap) {
-            return this.emit('error', new BadDataError(json.action, peer.peerID))
-          }
-          const clonedStreamWithGain = this.gainMap[peer.peerID].find(entry => entry.type === type)
-          if (clonedStreamWithGain && clonedStreamWithGain.gainNode) {
-            clonedStreamWithGain.gainNode.gain.value = volume
-          }
-          break
-        }
         case 'no-stream': {
           const { type } = json
           const remoteStreamIDs = peer._remoteStreams.map(x => x.id)
@@ -130,14 +116,13 @@ class SimplePeer extends AbstractWebRTC {
         case 'get-stream-info': {
           const { nonce, streamID } = json
           const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null, originalStream } = streamInfo
+          const { type = null, stream } = streamInfo
           let videoTrack
           let audioTrack
-          // We get audio and video enabled state from the original stream since the clonedStream will always have enabled = true
-          // and since we clone the video track
-          if (originalStream) {
-            videoTrack = originalStream.getVideoTracks()[0]
-            audioTrack = originalStream.getAudioTracks()[0]
+          // We get audio and video enabled state from the stream
+          if (stream) {
+            videoTrack = stream.getVideoTracks()[0]
+            audioTrack = stream.getAudioTracks()[0]
           }
           peer.send(JSON.stringify({
             action: 'stream-info',
@@ -249,6 +234,7 @@ class SimplePeer extends AbstractWebRTC {
       try {
         const info = await this._getRemoteStreamInfo(peer, stream)
         const { type, videoPaused, audioPaused } = info
+        await super.onRemoteTrack(track, stream)
         await this.emit('track', { peer, track, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
       } catch (e) {
         this.emit('error', e)
@@ -265,16 +251,13 @@ class SimplePeer extends AbstractWebRTC {
       }
     })
 
-    const clonedStreams = this.cloneAllStreams()
-    this.registerClonedStreams(clonedStreams, peer.peerID)
-    for (const entry of clonedStreams) {
-      peer.addStream(entry.stream)
+    for (const stream of this.streams) {
+      peer.addStream(stream)
     }
 
     const closePeer = () => {
       // console.log(`Closing peer: ${peer.peerID}`)
       delete this.peers[peer.peerID]
-      delete this.gainMap[peer.peerID]
       delete this.discoveryIDToPeer[discoveryID]
     }
     peer.on('destroy', closePeer)
@@ -320,39 +303,45 @@ class SimplePeer extends AbstractWebRTC {
     if (this.signalClient) {
       await this.lock.acquire('sendStream', async () => {
         for (const peer of Object.values(this.signalClient.peers())) {
-          const peerStreams = this.gainMap[peer.peerID]
-          if (!peerStreams) {
-            console.warn(`Failed to find peer streams for peerID: ${peer.peerID}`)
-            continue
+          if (oldStream) {
+            const clonedStream = peer.streamMap.get(oldStream)
+            if (clonedStream) {
+              delete this.streamInfo[clonedStream.id]
+              peer.removeStream(clonedStream)
+            }
           }
-          const oldClonedStream = peerStreams.find(e => e.type === type)
-          if (oldClonedStream) {
-            peerStreams.splice(peerStreams.indexOf(oldClonedStream), 1)
-            delete this.streamInfo[oldClonedStream.stream.id]
-            peer.removeStream(oldClonedStream.stream)
-          }
-
-          const clonedStreamWithGain = this.cloneStreamWithGain(newStream, type)
-          if (clonedStreamWithGain.stream) {
-            peerStreams.push(clonedStreamWithGain)
-            // We need to add data to streamInfo before we call addStream
-            // This is so that we have the necessary information to respond to the get-stream-info request
-            // that we will receive shortly
-            const stream = clonedStreamWithGain.stream
-            const videoTrack = stream.getVideoTracks()[0]
-            const audioTrack = newStream.getAudioTracks()[0]
-            this.streamInfo[clonedStreamWithGain.stream.id] = {
+          // We need to add data to streamInfo before we call addStream
+          // This is so that we have the necessary information to respond to the get-stream-info request
+          // that we will receive shortly
+          if (newStream) {
+            const tracks = newStream.getTracks()
+            const clonedTracks = [...tracks].map(t => {
+              const clone = t.clone()
+              clone.enabled = t.enabled
+              const stop = t.stop.bind(t)
+              t.stop = () => {
+                stop()
+                clone.stop()
+              }
+              t.addEventListener('ended', () => { clone.stop() })
+              return clone
+            })
+            const clonedStream = new MediaStream(clonedTracks)
+            const videoTrack = clonedStream.getVideoTracks()[0]
+            const audioTrack = clonedStream.getAudioTracks()[0]
+            this.streamInfo[clonedStream.id] = {
               peer,
               type,
-              stream: clonedStreamWithGain.stream,
+              stream: clonedStream,
               videoPaused: videoTrack && !videoTrack.enabled,
               audioPaused: audioTrack && !audioTrack.enabled,
               consumerVideoPaused: true,
-              consumerAudioPaused: true,
-              originalStream: clonedStreamWithGain.originalStream
+              consumerAudioPaused: true
             }
-            await peer.addStream(clonedStreamWithGain.stream)
+            peer.streamMap.set(newStream, clonedStream)
+            await peer.addStream(clonedStream)
           }
+
           if (!newStream || newStream.getTracks().length === 0) {
             peer.send(JSON.stringify({
               action: 'no-stream',
@@ -387,66 +376,23 @@ class SimplePeer extends AbstractWebRTC {
     // Do nothing. This is expected to be handled by the application
   }
 
-  cloneStreamWithGain (stream, type) {
-    if (!stream) {
-      return {}
-    }
-    const originalVideoTracks = [...stream.getVideoTracks()]
-    const clonedVideoTracks = originalVideoTracks.map(t => {
-      const clone = t.clone()
-      clone.enabled = t.enabled
-      const stop = t.stop.bind(t)
-      t.stop = () => {
-        stop()
-        clone.stop()
-      }
-      t.addEventListener('ended', () => { clone.stop() })
-      return clone
-    })
-    if (stream.getAudioTracks().length === 0) {
-      return { stream: new MediaStream(clonedVideoTracks), type }
-    }
-    const audioTrack = stream.getAudioTracks()[0]
-    var ctx = new AudioContext()
-    var src = ctx.createMediaStreamSource(new MediaStream([audioTrack]))
-    var dst = ctx.createMediaStreamDestination()
-    var gainNode = ctx.createGain()
-    gainNode.gain.value = 0.5
-    ;[src, gainNode, dst].reduce((a, b) => a && a.connect(b))
-    clonedVideoTracks.forEach(t => dst.stream.addTrack(t))
-    return { gainNode, stream: dst.stream, type, originalStream: stream }
-  }
-
-  cloneAllStreams () {
-    const result = []
-    const { streamInfo } = this
-    for (const stream of this.streams) {
-      const { id } = stream
-      const { [id]: { type } } = streamInfo
-      const clonedStream = this.cloneStreamWithGain(stream, type)
-      result.push(clonedStream)
-    }
-    return result
-  }
-
-  registerClonedStreams (clonedStreams, peerID) {
-    this.gainMap[peerID].push(...clonedStreams)
-    for (const entry of clonedStreams) {
-      const { stream } = entry
-      const { id } = stream
-      this.streamInfo[id] = entry
-    }
-  }
-
-  updateVolume (volume, peerID, type) {
-    const peer = this.peers[peerID]
-    if (!peer) {
-      throw new Error(`No peer found with id=${peerID}`)
-    }
+  updateVolume (volume, userIdentifier, type) {
     if (!type) {
-      throw new Error('Must specify a stream type')
+      throw new Error('Must specify type')
     }
-    peer.send(JSON.stringify({ action: 'volume-control', volume, type }))
+    const peer = this.discoveryIDToPeer[userIdentifier]
+    if (!peer) {
+      return
+    }
+    const streamInfo = this._getStreamInfo({ peer, type }, this.remoteStreamInfo)[0]
+    if (!streamInfo) {
+      return
+    }
+    const { stream } = streamInfo
+    if (!stream || !stream.volume) {
+      return
+    }
+    return stream.volume(volume)
   }
 
   _getStreamInfo (filters, streamInfo = this.streamInfo) {
