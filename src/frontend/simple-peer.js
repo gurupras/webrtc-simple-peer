@@ -234,7 +234,7 @@ class SimplePeer extends AbstractWebRTC {
       try {
         const info = await this._getRemoteStreamInfo(peer, stream)
         const { type, videoPaused, audioPaused } = info
-        await super.onRemoteTrack(track, stream, info)
+        await this.onRemoteTrack(track, stream, info)
         await this.emit('track', { peer, track, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
       } catch (e) {
         this.emit('error', e)
