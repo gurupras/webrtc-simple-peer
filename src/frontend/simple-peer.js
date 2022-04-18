@@ -222,7 +222,7 @@ class SimplePeer extends AbstractWebRTC {
         }
       }
     })
-    var events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
+    const events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
     events.forEach(evt => {
       peer.on(evt, data => {
         // console.log(`[simple-peer]: ${peer.peerID}: ${evt}`)
