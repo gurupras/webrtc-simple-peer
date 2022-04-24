@@ -313,51 +313,7 @@ class SimplePeer extends AbstractWebRTC {
     if (this.signalClient) {
       await this.lock.acquire('sendStream', async () => {
         for (const peer of Object.values(this.signalClient.peers())) {
-          if (oldStream) {
-            const clonedStream = peer.streamMap.get(oldStream)
-            if (clonedStream) {
-              delete this.streamInfo[clonedStream.id]
-              peer.removeStream(clonedStream)
-            }
-          }
-          // We need to add data to streamInfo before we call addStream
-          // This is so that we have the necessary information to respond to the get-stream-info request
-          // that we will receive shortly
-          if (newStream) {
-            const tracks = newStream.getTracks()
-            const clonedTracks = [...tracks].map(t => {
-              const clone = t.clone()
-              clone.enabled = t.enabled
-              const stop = t.stop.bind(t)
-              t.stop = () => {
-                stop()
-                clone.stop()
-              }
-              t.addEventListener('ended', () => { clone.stop() })
-              return clone
-            })
-            const clonedStream = new MediaStream(clonedTracks)
-            const videoTrack = clonedStream.getVideoTracks()[0]
-            const audioTrack = clonedStream.getAudioTracks()[0]
-            this.streamInfo[clonedStream.id] = {
-              peer,
-              type,
-              stream: clonedStream,
-              videoPaused: videoTrack && !videoTrack.enabled,
-              audioPaused: audioTrack && !audioTrack.enabled,
-              consumerVideoPaused: true,
-              consumerAudioPaused: true
-            }
-            peer.streamMap.set(newStream, clonedStream)
-            await peer.addStream(clonedStream)
-          }
-
-          if (!newStream || newStream.getTracks().length === 0) {
-            peer.send(JSON.stringify({
-              action: 'no-stream',
-              type
-            }))
-          }
+          await this._sendStreamToPeer(peer, newStream, oldStream, type)
         }
       })
     }
@@ -371,6 +327,54 @@ class SimplePeer extends AbstractWebRTC {
         this.streams.splice(oldStreamIndex, 1)
       }
       delete this.streamInfo[oldStream.id]
+    }
+  }
+
+  async _sendStreamToPeer (peer, newStream, oldStream, type) {
+    if (oldStream) {
+      const clonedStream = peer.streamMap.get(oldStream)
+      if (clonedStream) {
+        delete this.streamInfo[clonedStream.id]
+        peer.removeStream(clonedStream)
+      }
+    }
+    // We need to add data to streamInfo before we call addStream
+    // This is so that we have the necessary information to respond to the get-stream-info request
+    // that we will receive shortly
+    if (newStream) {
+      const tracks = newStream.getTracks()
+      const clonedTracks = [...tracks].map(t => {
+        const clone = t.clone()
+        clone.enabled = t.enabled
+        const stop = t.stop.bind(t)
+        t.stop = () => {
+          stop()
+          clone.stop()
+        }
+        t.addEventListener('ended', () => { clone.stop() })
+        return clone
+      })
+      const clonedStream = new MediaStream(clonedTracks)
+      const videoTrack = clonedStream.getVideoTracks()[0]
+      const audioTrack = clonedStream.getAudioTracks()[0]
+      this.streamInfo[clonedStream.id] = {
+        peer,
+        type,
+        stream: clonedStream,
+        videoPaused: videoTrack && !videoTrack.enabled,
+        audioPaused: audioTrack && !audioTrack.enabled,
+        consumerVideoPaused: true,
+        consumerAudioPaused: true
+      }
+      peer.streamMap.set(newStream, clonedStream)
+      await peer.addStream(clonedStream)
+    }
+
+    if (!newStream || newStream.getTracks().length === 0) {
+      peer.send(JSON.stringify({
+        action: 'no-stream',
+        type
+      }))
     }
   }
 
