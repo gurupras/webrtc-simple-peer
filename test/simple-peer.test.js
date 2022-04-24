@@ -91,9 +91,10 @@ describe('SimplePeer', () => {
     simplePeer.setupPeer = jest.fn()
     mockSimpleSignalClient(simplePeer)
     await simplePeer.signalClient.emit('discover', [nanoid(), nanoid()])
+    await new Promise(resolve => setTimeout(resolve, 0))
     await simplePeer.lock.acquire('discoveryIDToPeer', async () => {
-      await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
-      await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
+      expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
+      expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
     })
   })
 
@@ -114,6 +115,7 @@ describe('SimplePeer', () => {
     // Pretend to have connected to peers[1]
     simplePeer.discoveryIDToPeer[peers[1]] = {}
     await simplePeer.signalClient.emit('discover', peers)
+    await new Promise(resolve => setTimeout(resolve, 0))
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledTimes(2)
     await expect(simplePeer.signalClient.connect).toHaveBeenCalledWith(peers[0], { userIdentifier: simplePeer.userIdentifier }, simplePeer.options.peerOpts)
     await expect(simplePeer.setupPeer).toHaveBeenCalledTimes(2)
@@ -324,6 +326,7 @@ describe('SimplePeer', () => {
         simplePeer.streamInfo[id] = { type: idx % 2 ? 'audio' : 'video' }
       })
       peer.addStream = jest.fn()
+      peer.send = jest.fn()
       await simplePeer.setupPeer(peer, generateFakeMetadata(), peer.peerID)
       expect(peer.addStream).toHaveBeenCalledTimes(simplePeer.streams.length)
     })

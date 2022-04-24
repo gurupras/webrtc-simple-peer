@@ -52,7 +52,7 @@ class SimplePeer extends AbstractWebRTC {
         })
         const { userIdentifier: remoteUserIdentifier } = metadata
         // console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
-        this.setupPeer(peer, metadata, remoteUserIdentifier)
+        await this.setupPeer(peer, metadata, remoteUserIdentifier)
       }
     })
     this.signalClient = signalClient
@@ -74,7 +74,7 @@ class SimplePeer extends AbstractWebRTC {
         ...peerOpts
       })
       // console.log(`[simple-peer]: Accepted request: ${peer._id}`)
-      this.setupPeer(peer, metadata, remoteUserIdentifier)
+      await this.setupPeer(peer, metadata, remoteUserIdentifier)
     })
   }
 
@@ -82,7 +82,7 @@ class SimplePeer extends AbstractWebRTC {
     return this.signalClient.discover()
   }
 
-  setupPeer (peer, metadata, discoveryID) {
+  async setupPeer (peer, metadata, discoveryID) {
     peer.peerID = discoveryID // Expose a standard UID
     this.discoveryIDToPeer[discoveryID] = peer
     peer.streamMap = new Map()
@@ -251,10 +251,6 @@ class SimplePeer extends AbstractWebRTC {
       }
     })
 
-    for (const stream of this.streams) {
-      peer.addStream(stream)
-    }
-
     const closePeer = () => {
       // console.log(`Closing peer: ${peer.peerID}`)
       delete this.peers[peer.peerID]
@@ -274,6 +270,8 @@ class SimplePeer extends AbstractWebRTC {
 
     // console.log(`peer: ${peer.peerID} has been set up`)
     this.peers[peer.peerID] = peer
+
+    await Promise.all(this.streams.map(stream => this._sendStreamToPeer(peer, stream, null, this.streamInfo[stream.id].type)))
   }
 
   async _getRemoteStreamInfo (peer, stream) {
