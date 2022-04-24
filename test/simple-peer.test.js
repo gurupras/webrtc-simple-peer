@@ -571,6 +571,33 @@ describe('SimplePeer', () => {
     })
   })
 
+  describe('_getRemoteStreamInfo', () => {
+    test('Removes existing info if any', async () => {
+      const simplePeer = create()
+      const peer = new FakePeer()
+      const type = 'screen'
+      const fakeStreams = [new FakeMediaStream(), new FakeMediaStream()]
+      fakeStreams.forEach(stream => {
+        simplePeer.remoteStreamInfo[stream.id] = { peer, stream, type }
+      })
+      const newStream = new FakeMediaStream()
+      peer.send = jest.fn().mockImplementation((data) => {
+        const json = JSON.parse(data)
+        peer.emit('data', JSON.stringify({
+          action: 'stream-info',
+          nonce: json.nonce,
+          streamID: json.streamID,
+          type
+        }))
+      })
+      await simplePeer._getRemoteStreamInfo(peer, newStream)
+      fakeStreams.forEach(stream => {
+        expect(simplePeer.remoteStreamInfo[stream.id]).toBeUndefined()
+      })
+      expect(simplePeer.remoteStreamInfo[newStream.id]).toBeTruthy()
+    })
+  })
+
   describe.each([
     ['webcam', 'video', 'videoPaused', 'consumerVideoPaused'],
     ['webcam', 'audio', 'audioPaused', 'consumerAudioPaused']

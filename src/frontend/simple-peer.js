@@ -293,6 +293,16 @@ class SimplePeer extends AbstractWebRTC {
       }))
       const json = await promise
       const { type, videoPaused, audioPaused } = json
+      // If there is existing data in remoteStreams for this peer and this type, remove it
+      const existingInfo = this._getStreamInfo({ peer, type }, this.remoteStreamInfo)
+      if (existingInfo) {
+        existingInfo.forEach(entry => {
+          const { stream: { id: streamID } } = entry
+          if (streamID !== stream.id) {
+            delete this.remoteStreamInfo[streamID]
+          }
+        })
+      }
       this.remoteStreamInfo[stream.id] = { peer, type, stream, videoPaused, audioPaused }
       return json
     })
