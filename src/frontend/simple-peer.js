@@ -259,8 +259,19 @@ class SimplePeer extends AbstractWebRTC {
       // console.log(`Closing peer: ${peer.peerID}`)
       delete this.peers[peer.peerID]
       delete this.discoveryIDToPeer[discoveryID]
+      // Delete all streamInfos that we have for this peer
+      const infos = this._getStreamInfo({ peer })
+      infos.forEach(info => {
+        const { stream: { id: streamID } } = info
+        delete this.streamInfo[streamID]
+      })
+      // We don't need to wipe out the peer.streamMap because
+      // that object will get garbage collected when peer
+      // goes out of scope.
     }
     peer.on('destroy', closePeer)
+    peer.on('close', closePeer)
+
     // console.log(`peer: ${peer.peerID} has been set up`)
     this.peers[peer.peerID] = peer
   }
