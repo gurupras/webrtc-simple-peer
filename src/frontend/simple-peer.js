@@ -45,14 +45,15 @@ class SimplePeer extends AbstractWebRTC {
       const { options: { peerOpts } } = this
       // console.log(`Found peers: ${JSON.stringify(peerIDs)}`)
       for (const peerID of peerIDs) {
-        const { peer, metadata } = await signalClient.connect(peerID, {
+        signalClient.connect(peerID, {
           userIdentifier
         }, {
           ...peerOpts
+        }).then(async ({ peer, metadata }) => {
+          const { userIdentifier: remoteUserIdentifier } = metadata
+          // console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
+          await this.setupPeer(peer, metadata, remoteUserIdentifier)
         })
-        const { userIdentifier: remoteUserIdentifier } = metadata
-        // console.log(`[simple-peer]: Connected to peer: ${peer._id}`)
-        await this.setupPeer(peer, metadata, remoteUserIdentifier)
       }
     })
     this.signalClient = signalClient
