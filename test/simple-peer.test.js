@@ -212,7 +212,7 @@ describe('SimplePeer', () => {
           type = 'dummy'
           const stream = new FakeMediaStream(null, { numVideoTracks: 1, numAudioTracks: 1 })
           stream.getVideoTracks()[0].enabled = false
-          simplePeer.streamInfo[stream.id] = { type, stream }
+          simplePeer.streamInfo[stream.id] = { type, stream, videoPaused: true, audioPaused: false }
           streamID = stream.id
 
           expectedResult = {

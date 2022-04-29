@@ -117,20 +117,13 @@ class SimplePeer extends AbstractWebRTC {
         case 'get-stream-info': {
           const { nonce, streamID } = json
           const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null, stream } = streamInfo
-          let videoTrack
-          let audioTrack
-          // We get audio and video enabled state from the stream
-          if (stream) {
-            videoTrack = stream.getVideoTracks()[0]
-            audioTrack = stream.getAudioTracks()[0]
-          }
+          const { type = null, videoPaused, audioPaused } = streamInfo
           peer.send(JSON.stringify({
             action: 'stream-info',
             nonce,
             type,
-            videoPaused: videoTrack ? !videoTrack.enabled : undefined,
-            audioPaused: audioTrack ? !audioTrack.enabled : undefined
+            videoPaused: videoPaused,
+            audioPaused: audioPaused
           }))
           break
         }
