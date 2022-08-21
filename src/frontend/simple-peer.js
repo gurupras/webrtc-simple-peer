@@ -36,6 +36,12 @@ class SimplePeer extends AbstractWebRTC {
     })
   }
 
+  async updateSocket (socket) {
+    this.socket = socket
+    await this.destroy()
+    await this.setup()
+  }
+
   async setup () {
     const { socket } = this
 
