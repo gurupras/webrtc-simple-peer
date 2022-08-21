@@ -465,7 +465,7 @@ describe('SimplePeer', () => {
         peers = {}
         newStream = new FakeMediaStream()
         oldStream = new FakeMediaStream()
-        simplePeer.signalClient.peers = jest.fn().mockReturnValue(peers)
+        simplePeer.peers = peers
       })
       test('Sends newStream to all peers', async () => {
         const peers = addPeers(3)

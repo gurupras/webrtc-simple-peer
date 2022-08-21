@@ -90,188 +90,190 @@ class SimplePeer extends AbstractWebRTC {
   }
 
   async setupPeer (peer, metadata, discoveryID) {
-    peer.peerID = discoveryID // Expose a standard UID
-    this.discoveryIDToPeer[discoveryID] = peer
-    peer.streamMap = new Map()
-    peer.metadata = metadata
-    peer.on('data', async data => {
-      let json
-      try {
-        json = JSON.parse(data)
-      } catch (e) {
-        return this.emit('error', new BadDataError('', peer.peerID, data))
-      }
-      switch (json.action) {
-        case 'no-stream': {
-          const { type } = json
-          const remoteStreamIDs = peer._remoteStreams.map(x => x.id)
-          peer._remoteStreams.splice(0, peer._remoteStreams.length)
-          for (const remoteStreamID of remoteStreamIDs) {
-            const entry = this.remoteStreamInfo[remoteStreamID]
-            if (!entry || entry.type !== type) {
-              continue
+    await this.lock.acquire('peers', async () => {
+      peer.peerID = discoveryID // Expose a standard UID
+      this.discoveryIDToPeer[discoveryID] = peer
+      peer.streamMap = new Map()
+      peer.metadata = metadata
+      peer.on('data', async data => {
+        let json
+        try {
+          json = JSON.parse(data)
+        } catch (e) {
+          return this.emit('error', new BadDataError('', peer.peerID, data))
+        }
+        switch (json.action) {
+          case 'no-stream': {
+            const { type } = json
+            const remoteStreamIDs = peer._remoteStreams.map(x => x.id)
+            peer._remoteStreams.splice(0, peer._remoteStreams.length)
+            for (const remoteStreamID of remoteStreamIDs) {
+              const entry = this.remoteStreamInfo[remoteStreamID]
+              if (!entry || entry.type !== type) {
+                continue
+              }
+              delete this.remoteStreamInfo[remoteStreamID]
             }
-            delete this.remoteStreamInfo[remoteStreamID]
+            this.emit('no-stream', {
+              peer,
+              metadata,
+              data: undefined
+            })
+            break
           }
-          this.emit('no-stream', {
-            peer,
-            metadata,
-            data: undefined
-          })
-          break
-        }
-        case 'get-stream-info': {
-          const { nonce, streamID } = json
-          const streamInfo = this.streamInfo[streamID] || {}
-          const { type = null, videoPaused, audioPaused } = streamInfo
-          peer.send(JSON.stringify({
-            action: 'stream-info',
-            nonce,
-            type,
-            videoPaused: videoPaused,
-            audioPaused: audioPaused
-          }))
-          break
-        }
-        case 'pauseProducer': {
-          const { type, kind } = json
-          const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
-          if (!info) {
-            console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
-            return
+          case 'get-stream-info': {
+            const { nonce, streamID } = json
+            const streamInfo = this.streamInfo[streamID] || {}
+            const { type = null, videoPaused, audioPaused } = streamInfo
+            peer.send(JSON.stringify({
+              action: 'stream-info',
+              nonce,
+              type,
+              videoPaused: videoPaused,
+              audioPaused: audioPaused
+            }))
+            break
           }
-          switch (kind) {
-            case 'video':
-              info.videoPaused = true
-              break
-            case 'audio':
-              info.audioPaused = true
-              break
-          }
-          this.emit('stream-update', { peer, metadata, data: info })
-          break
-        }
-        case 'resumeProducer': {
-          const { type, kind } = json
-          const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
-          if (!info) {
-            console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
-            return
-          }
-          switch (kind) {
-            case 'video':
-              info.videoPaused = false
-              break
-            case 'audio':
-              info.audioPaused = false
-              break
-          }
-          this.emit('stream-update', { peer, metadata, data: info })
-          break
-        }
-        case 'pauseConsumer': {
-          await this.lock.acquire([peer.peerID], async () => {
+          case 'pauseProducer': {
             const { type, kind } = json
-            const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+            const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
             if (!info) {
               console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
               return
             }
-            const track = this._getTrack(type, kind, info)
-            if (!track) {
-              return
-            }
-            track.enabled = false
             switch (kind) {
-              case 'audio':
-                info.consumerAudioPaused = true
-                break
               case 'video':
-                info.consumerVideoPaused = true
+                info.videoPaused = true
+                break
+              case 'audio':
+                info.audioPaused = true
                 break
             }
             this.emit('stream-update', { peer, metadata, data: info })
-          })
-          break
-        }
-        case 'resumeConsumer': {
-          await this.lock.acquire([peer.peerID], async () => {
+            break
+          }
+          case 'resumeProducer': {
             const { type, kind } = json
-            const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+            const info = this._getStreamInfo({ type, peer }, this.remoteStreamInfo)[0]
             if (!info) {
               console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
               return
             }
-            const track = this._getTrack(type, kind, info)
-            if (!track) {
-              return
-            }
             switch (kind) {
-              case 'audio':
-                info.consumerAudioPaused = false
-                track.enabled = !info.audioPaused
-                break
               case 'video':
-                info.consumerVideoPaused = false
-                track.enabled = !info.videoPaused
+                info.videoPaused = false
+                break
+              case 'audio':
+                info.audioPaused = false
                 break
             }
             this.emit('stream-update', { peer, metadata, data: info })
-          })
-          break
+            break
+          }
+          case 'pauseConsumer': {
+            await this.lock.acquire([peer.peerID], async () => {
+              const { type, kind } = json
+              const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+              if (!info) {
+                console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
+                return
+              }
+              const track = this._getTrack(type, kind, info)
+              if (!track) {
+                return
+              }
+              track.enabled = false
+              switch (kind) {
+                case 'audio':
+                  info.consumerAudioPaused = true
+                  break
+                case 'video':
+                  info.consumerVideoPaused = true
+                  break
+              }
+              this.emit('stream-update', { peer, metadata, data: info })
+            })
+            break
+          }
+          case 'resumeConsumer': {
+            await this.lock.acquire([peer.peerID], async () => {
+              const { type, kind } = json
+              const info = this._getStreamInfo({ type, peer }, this.streamInfo)[0]
+              if (!info) {
+                console.warn('No stream found', { action: json.action, type, kind, peerID: peer.peerID })
+                return
+              }
+              const track = this._getTrack(type, kind, info)
+              if (!track) {
+                return
+              }
+              switch (kind) {
+                case 'audio':
+                  info.consumerAudioPaused = false
+                  track.enabled = !info.audioPaused
+                  break
+                case 'video':
+                  info.consumerVideoPaused = false
+                  track.enabled = !info.videoPaused
+                  break
+              }
+              this.emit('stream-update', { peer, metadata, data: info })
+            })
+            break
+          }
         }
-      }
-    })
-    const events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
-    events.forEach(evt => {
-      peer.on(evt, data => {
-        // console.log(`[simple-peer]: ${peer.peerID}: ${evt}`)
-        this.emit(evt, { peer, metadata, data })
       })
-    }, this)
-    // Track is special because it has a second argument
-    peer.on('track', async (track, stream) => {
-      try {
-        const info = await this._getRemoteStreamInfo(peer, stream)
-        const { type, videoPaused, audioPaused } = info
-        await this.onRemoteTrack(track, stream, info)
-        await this.emit('track', { peer, track, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
-      } catch (e) {
-        this.emit('error', e)
-      }
-    })
-
-    peer.on('stream', async stream => {
-      try {
-        const info = await this._getRemoteStreamInfo(peer, stream)
-        const { type, videoPaused, audioPaused } = info
-        await this.emit('stream', { peer, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
-      } catch (e) {
-        this.emit('error', e)
-      }
-    })
-
-    const closePeer = () => {
-      // console.log(`Closing peer: ${peer.peerID}`)
-      delete this.peers[peer.peerID]
-      delete this.discoveryIDToPeer[discoveryID]
-      // Delete all streamInfos that we have for this peer
-      const infos = this._getStreamInfo({ peer })
-      infos.forEach(info => {
-        const { stream: { id: streamID } } = info
-        delete this.streamInfo[streamID]
+      const events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
+      events.forEach(evt => {
+        peer.on(evt, data => {
+          // console.log(`[simple-peer]: ${peer.peerID}: ${evt}`)
+          this.emit(evt, { peer, metadata, data })
+        })
+      }, this)
+      // Track is special because it has a second argument
+      peer.on('track', async (track, stream) => {
+        try {
+          const info = await this._getRemoteStreamInfo(peer, stream)
+          const { type, videoPaused, audioPaused } = info
+          await this.onRemoteTrack(track, stream, info)
+          await this.emit('track', { peer, track, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
+        } catch (e) {
+          this.emit('error', e)
+        }
       })
-      // We don't need to wipe out the peer.streamMap because
-      // that object will get garbage collected when peer
-      // goes out of scope.
-    }
-    peer.on('destroy', closePeer)
-    peer.on('close', closePeer)
 
-    // console.log(`peer: ${peer.peerID} has been set up`)
-    this.peers[peer.peerID] = peer
+      peer.on('stream', async stream => {
+        try {
+          const info = await this._getRemoteStreamInfo(peer, stream)
+          const { type, videoPaused, audioPaused } = info
+          await this.emit('stream', { peer, stream, metadata: { ...metadata, type, videoPaused, audioPaused } })
+        } catch (e) {
+          this.emit('error', e)
+        }
+      })
 
-    await Promise.all(this.streams.map(stream => this._sendStreamToPeer(peer, stream, null, this.streamInfo[stream.id].type)))
+      const closePeer = () => {
+        // console.log(`Closing peer: ${peer.peerID}`)
+        delete this.peers[peer.peerID]
+        delete this.discoveryIDToPeer[discoveryID]
+        // Delete all streamInfos that we have for this peer
+        const infos = this._getStreamInfo({ peer })
+        infos.forEach(info => {
+          const { stream: { id: streamID } } = info
+          delete this.streamInfo[streamID]
+        })
+        // We don't need to wipe out the peer.streamMap because
+        // that object will get garbage collected when peer
+        // goes out of scope.
+      }
+      peer.on('destroy', closePeer)
+      peer.on('close', closePeer)
+
+      // console.log(`peer: ${peer.peerID} has been set up`)
+      this.peers[peer.peerID] = peer
+
+      await Promise.all(this.streams.map(stream => this._sendStreamToPeer(peer, stream, null, this.streamInfo[stream.id].type)))
+    })
   }
 
   async _getRemoteStreamInfo (peer, stream) {
@@ -320,8 +322,8 @@ class SimplePeer extends AbstractWebRTC {
 
   async sendStream (newStream, oldStream, type) {
     if (this.signalClient) {
-      await this.lock.acquire('sendStream', async () => {
-        for (const peer of Object.values(this.signalClient.peers())) {
+      await this.lock.acquire(['peers', 'sendStream'], async () => {
+        for (const peer of Object.values(this.peers)) {
           await this._sendStreamToPeer(peer, newStream, oldStream, type)
         }
       })
