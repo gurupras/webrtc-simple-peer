@@ -38,7 +38,16 @@ class SimplePeer extends AbstractWebRTC {
 
   async updateSocket (socket) {
     this.socket = socket
-    await this.destroy()
+    // Save all the streams that are currently being sent out
+    const streams = this.streams
+    const streamInfo = {}
+    streams.forEach(stream => {
+      streamInfo[stream.id] = this.streamInfo[stream.id]
+    })
+    // Restore streams currently being sent out so that new connections
+    // automatically get these streams
+    this.streams = streams
+    this.streamInfo = streamInfo
     await this.setup()
   }
 
