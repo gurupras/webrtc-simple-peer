@@ -882,4 +882,147 @@ describe('SimplePeer', () => {
       })
     })
   })
+
+  test('\'volume\' event updates remoteStreamInfo volume', async () => {
+    const simplePeer = create()
+    const streamID = nanoid()
+    const volume = 0.4
+    simplePeer.remoteStreamInfo[streamID] = {}
+    const peer = new FakePeer()
+    await simplePeer.setupPeer(peer, generateFakeMetadata(), peer.peerID)
+    await peer.emit('data', JSON.stringify({
+      action: 'volume',
+      data: { streamID, volume }
+    }))
+    expect(simplePeer.remoteStreamInfo[streamID].volume).toEqual(volume)
+  })
+})
+
+describe('wrapSocketForSignalClient', () => {
+  let socket
+  /** @type {ReturnType<typeof wrapSocketForSignalClient>} */
+  let wrapped
+  beforeEach(() => {
+    const emitter = new Emittery()
+    socket = {
+      on: jest.fn().mockImplementation((...args) => emitter.on(...args)),
+      emit: jest.fn().mockImplementation((...args) => emitter.emit(...args)),
+      off: jest.fn().mockImplementation((...args) => emitter.off(...args)),
+      close: jest.fn()
+    }
+    wrapped = wrapSocketForSignalClient(socket)
+  })
+
+  describe('on', () => {
+    test('Sets up event listeners on underlying socket', async () => {
+      const cb = jest.fn()
+      const event = 'test'
+      wrapped.on(event, cb)
+      expect(socket.on).toHaveBeenCalledWith(event, cb)
+    })
+
+    test('Able to set up multiple listeners for same event', async () => {
+      const data = 'foo'
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      const cb2 = jest.fn()
+      wrapped.on(event1, cb1)
+      wrapped.on(event1, cb2)
+      await socket.emit(event1, data)
+      expect(cb1).toHaveBeenCalledWith(data)
+      expect(cb2).toHaveBeenCalledWith(data)
+    })
+
+    test('Can set up multiple, independent event listeners', async () => {
+      const data = 'foo'
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      const event2 = 'test2'
+      const cb2 = jest.fn()
+      wrapped.on(event1, cb1)
+      wrapped.on(event2, cb2)
+
+      await socket.emit(event1, data)
+      expect(cb1).toHaveBeenCalledWith(data)
+      expect(cb2).not.toHaveBeenCalled()
+
+      cb1.mockClear()
+      cb2.mockClear()
+
+      await socket.emit(event2, data)
+      expect(cb2).toHaveBeenCalledWith(data)
+      expect(cb1).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('emit', () => {
+    test('Emits event on underlying socket', async () => {
+      const data = 'foo'
+      const event = 'test'
+      wrapped.emit(event, data)
+      expect(socket.emit).toHaveBeenCalledWith(event, data)
+    })
+  })
+
+  describe('off', () => {
+    test('Removes event listener from underlying socket', async () => {
+      const data = 'foo'
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      const cb2 = jest.fn()
+      socket.on(event1, cb1)
+      socket.on(event1, cb2)
+      wrapped.off(event1, cb1)
+      await socket.emit(event1, data)
+      expect(cb2).toHaveBeenCalledWith(data)
+      expect(cb1).not.toHaveBeenCalled()
+    })
+    test('Calls socket.off for unregistered event', async () => {
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      socket.on(event1, cb1)
+      wrapped.off('bad', cb1)
+      expect(socket.off).toHaveBeenCalled()
+    })
+    test('Removes entry from map', async () => {
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      const cb2 = jest.fn()
+      wrapped.listeners.set(event1, new Set([cb1, cb2]))
+      wrapped.off(event1, cb1)
+      expect(wrapped.listeners.get(event1).size).toBe(1)
+    })
+    test('Deletes map entry if all callbacks are removed for an event', async () => {
+      const event1 = 'test1'
+      const cb1 = jest.fn()
+      const cb2 = jest.fn()
+      wrapped.listeners.set(event1, new Set([cb1, cb2]))
+      wrapped.off(event1, cb1)
+      wrapped.off(event1, cb2)
+      expect(wrapped.listeners.has(event1)).toBeFalse()
+    })
+  })
+  describe('close', () => {
+    let event1
+    let cb1
+    let event2
+    let cb2
+    beforeEach(() => {
+      event1 = 'test1'
+      cb1 = jest.fn()
+      event2 = 'test2'
+      cb2 = jest.fn()
+      wrapped.listeners.set(event1, new Set([cb1]))
+      wrapped.listeners.set(event2, new Set([cb2]))
+    })
+    test('Removes all event listeners from underlying socket', async () => {
+      wrapped.close()
+      expect(socket.off).toHaveBeenNthCalledWith(1, event1, cb1)
+      expect(socket.off).toHaveBeenNthCalledWith(2, event2, cb2)
+    })
+    test('Does not close the socket', async () => {
+      wrapped.close()
+      expect(socket.close).not.toHaveBeenCalled()
+    })
+  })
 })

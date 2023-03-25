@@ -52,7 +52,10 @@ class SimplePeer extends AbstractWebRTC {
   async setup () {
     const { socket } = this
 
-    const signalClient = new SimpleSignalClient(socket)
+    // We cannot pass in this socket as-is because SimpleSignalClient does not give us an easy way to cleanly destroy without closing socket
+    // As a result, we're going to pass in a socket-like item
+    const signalSocket = wrapSocketForSignalClient(socket)
+    const signalClient = new SimpleSignalClient(signalSocket)
     const { userIdentifier } = this
     signalClient.on('discover', async (peerIDs = []) => {
       const { options: { peerOpts } } = this
@@ -136,8 +139,8 @@ class SimplePeer extends AbstractWebRTC {
               action: 'stream-info',
               nonce,
               type,
-              videoPaused: videoPaused,
-              audioPaused: audioPaused
+              videoPaused,
+              audioPaused
             }))
             break
           }
@@ -530,11 +533,45 @@ class SimplePeer extends AbstractWebRTC {
     this.streamInfo = {}
     // Disconnect from all peers
     if (this.signalClient) {
-      const peers = this.signalClient.peers()
-      Object.keys(peers).forEach(key => peers[key].destroy())
+      this.signalClient.destroy()
       this.signalClient = undefined
     }
   }
+}
+
+function wrapSocketForSignalClient (socket) {
+  const signalSocket = {
+    listeners: new Map(),
+    close () {
+      for (const evt of this.listeners.keys()) {
+        const cbSet = this.listeners.get(evt)
+        cbSet.forEach(cb => socket.off(evt, cb))
+      }
+    },
+    on (evt, cb) {
+      let cbSet = this.listeners.get(evt)
+      if (!cbSet) {
+        cbSet = new Set()
+        this.listeners.set(evt, cbSet)
+      }
+      cbSet.add(cb)
+      socket.on(evt, cb)
+    },
+    off (evt, cb) {
+      socket.off(evt, cb)
+      const cbSet = this.listeners.get(evt)
+      if (cbSet) {
+        cbSet.delete(cb)
+        if (cbSet.size === 0) {
+          this.listeners.delete(evt)
+        }
+      }
+    },
+    emit (...args) {
+      socket.emit(...args)
+    }
+  }
+  return signalSocket
 }
 
 class BadDataError extends Error {
@@ -555,6 +592,7 @@ class RequestTimedOutError extends Error {
 
 module.exports = {
   SimplePeer,
+  wrapSocketForSignalClient,
   BadDataError,
   RequestTimedOutError
 }
