@@ -526,7 +526,6 @@ class SimplePeer extends AbstractWebRTC {
 
   destroy () {
     this.streams.forEach(stream => {
-      stream.getTracks().forEach(t => t.stop())
       delete this.streamInfo[stream.id]
     }, this)
     this.streams = []

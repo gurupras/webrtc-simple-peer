@@ -346,28 +346,9 @@ describe('SimplePeer', () => {
 
     test('Clears out data even if signalClient is not initialized', async () => {
       simplePeer.signalClient = undefined
-      const streams = [...simplePeer.streams]
       await simplePeer.destroy()
-      for (const stream of streams) {
-        const tracks = stream.getTracks()
-        for (const track of tracks) {
-          expect(track.stop).toHaveBeenCalledTimes(1)
-        }
-      }
       expect(simplePeer.streams).toBeArrayOfSize(0)
       expect(simplePeer.streamInfo).toEqual({})
-    })
-
-    test('Stops all streams', async () => {
-      const streams = [...Array(5)].map(x => new FakeMediaStream(null, { numVideoTracks: 10, numAudioTracks: 10 }))
-      simplePeer.streams = streams
-      await simplePeer.destroy()
-      for (const stream of streams) {
-        const tracks = stream.getTracks()
-        for (const track of tracks) {
-          expect(track.stop).toHaveBeenCalledTimes(1)
-        }
-      }
     })
 
     test('Clears out all streams', async () => {
