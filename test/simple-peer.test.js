@@ -63,7 +63,8 @@ function mockSimpleSignalClient (sp) {
     connect: jest.fn().mockImplementation(async (peerID, metadata, opts) => {
       return generateFakeSimpleSignalPeer()
     }),
-    discover: jest.fn()
+    discover: jest.fn(),
+    peers: jest.fn().mockReturnValue(Object.values(sp.signalClient.peers))
   })
 }
 
@@ -387,7 +388,7 @@ describe('SimplePeer', () => {
         peers[peer.peerID] = peer
       })
 
-      simplePeer.signalClient.peers = jest.fn().mockReturnValue(peers)
+      simplePeer.signalClient.peers = jest.fn().mockReturnValue(peersArray)
       await simplePeer.destroy()
       for (const peer of peersArray) {
         expect(peer.destroy).toHaveBeenCalledTimes(1)
