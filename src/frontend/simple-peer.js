@@ -26,14 +26,12 @@ class SimplePeer extends AbstractWebRTC {
     options = deepmerge(defaultOpts, options)
     super(options, socket, userIdentifier)
 
-    Object.assign(this, {
-      peers: {},
-      discoveryIDToPeer: {},
-      streams: [],
-      streamInfo: {},
-      remoteStreamInfo: {},
-      lock: new AsyncLock()
-    })
+    this.peers = {}
+    this.discoveryIDToPeer = {}
+    this.streams = []
+    this.streamInfo = {}
+    this.remoteStreamInfo = {}
+    this.lock = new AsyncLock()
   }
 
   async updateSocket (socket) {
