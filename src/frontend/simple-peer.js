@@ -3,6 +3,7 @@ const { nanoid } = require('nanoid')
 const SimpleSignalClient = require('simple-signal-client')
 const AbstractWebRTC = require('@gurupras/abstract-webrtc')
 const AsyncLock = require('async-lock')
+const { VolumeMeter } = require('./volume-meter')
 
 class SimplePeer extends AbstractWebRTC {
   constructor (options, socket, userIdentifier) {
@@ -21,7 +22,8 @@ class SimplePeer extends AbstractWebRTC {
         },
         trickle: true
       },
-      requestTimeoutMS: 2000
+      requestTimeoutMS: 2000,
+      volumesEventInterval: 3000
     }
     options = deepmerge(defaultOpts, options)
     super(options, socket, userIdentifier)
@@ -93,6 +95,17 @@ class SimplePeer extends AbstractWebRTC {
       // console.log(`[simple-peer]: Accepted request: ${peer._id}`)
       await this.setupPeer(peer, metadata, remoteUserIdentifier)
     })
+  }
+
+  setupVolumesEvent () {
+    this.volumesEventInterval = setInterval(() => {
+      const volumes = {}
+      for (const entry of Object.values(this.remoteStreamInfo)) {
+        const { peer: { metadata: { userIdentifier } }, volume } = entry
+        volumes[userIdentifier] = { volume }
+      }
+      this.emit('volumes', volumes)
+    }, this.options.volumesEventInterval)
   }
 
   discover () {
@@ -231,6 +244,13 @@ class SimplePeer extends AbstractWebRTC {
             })
             break
           }
+          case 'volume': {
+            const { data: { streamID, volume } } = json
+            if (this.remoteStreamInfo[streamID]) {
+              this.remoteStreamInfo[streamID].volume = volume
+            }
+            break
+          }
         }
       })
       const events = ['connect', 'close', 'signal', 'destroy', 'error', 'data']
@@ -340,12 +360,52 @@ class SimplePeer extends AbstractWebRTC {
     }
     if (newStream) {
       this.streams.push(newStream)
-      this.streamInfo[newStream.id] = { type, stream: newStream }
+      // Set up volume event if necessary
+      const audioTrack = newStream.getAudioTracks()[0]
+      const newStreamData = {
+        type,
+        stream: newStream
+      }
+      if (audioTrack) {
+        const volumeMeter = new VolumeMeter(newStream, this.options.volumeMeter)
+        const volumeInterval = setInterval(async () => {
+          const volume = await volumeMeter.getVolume()
+          for (const peer of Object.values(this.peers)) {
+            // Get the cloned stream ID and use that
+            const clonedStream = peer.streamMap.get(newStream)
+            if (!clonedStream) {
+              // Nothing to do
+              continue
+            }
+            peer.send(JSON.stringify({
+              action: 'volume',
+              data: {
+                streamID: clonedStream.id,
+                volume
+              }
+            }))
+          }
+        }, 1000)
+        await volumeMeter.start()
+        Object.assign(newStreamData, {
+          volumeMeter,
+          interval: volumeInterval,
+          destroy: async () => {
+            clearInterval(volumeInterval)
+            await volumeMeter.stop()
+          }
+        })
+      }
+      this.streamInfo[newStream.id] = newStreamData
     }
     if (oldStream) {
       const oldStreamIndex = this.streams.indexOf(oldStream)
       if (oldStreamIndex >= 0) {
         this.streams.splice(oldStreamIndex, 1)
+      }
+      const info = this.streamInfo[oldStream.id]
+      if (info && info.destroy) {
+        info.destroy() // We don't need to wait for this to complete
       }
       delete this.streamInfo[oldStream.id]
     }
@@ -525,10 +585,18 @@ class SimplePeer extends AbstractWebRTC {
   }
 
   destroy () {
+    if (this.volumesEventInterval) {
+      clearInterval(this.volumesEventInterval)
+    }
     this.streams.forEach(stream => {
       delete this.streamInfo[stream.id]
     }, this)
     this.streams = []
+    for (const entry of Object.values(this.streamInfo)) {
+      if (entry.destroy) {
+        entry.destroy()
+      }
+    }
     this.streamInfo = {}
     // Disconnect from all peers
     if (this.signalClient) {

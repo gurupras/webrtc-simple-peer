@@ -1,11 +1,12 @@
 import Emittery from 'emittery'
 import { nanoid } from 'nanoid'
-import { testForEvent, FakeAudioContext, FakeMediaStream } from '@gurupras/test-helpers'
-import { SimplePeer, BadDataError, RequestTimedOutError } from '../index'
+import { testForEvent, FakeAudioContext, FakeMediaStream, FakeAudioWorkletNode } from '@gurupras/test-helpers'
+import { SimplePeer, wrapSocketForSignalClient, BadDataError, RequestTimedOutError } from '../index'
 import testImplementation from '@gurupras/abstract-webrtc/test/test-implementation'
 
 beforeAll(() => {
   global.AudioContext = FakeAudioContext
+  global.AudioWorkletNode = FakeAudioWorkletNode
 })
 
 const rtcConfig = {
