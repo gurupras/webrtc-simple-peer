@@ -1,6 +1,6 @@
 const deepmerge = require('deepmerge')
 const { nanoid } = require('nanoid')
-const SimpleSignalClient = require('simple-signal-client')
+const SimpleSignalClient = require('@gurupras/simple-signal-client')
 const AbstractWebRTC = require('@gurupras/abstract-webrtc')
 const AsyncLock = require('async-lock')
 const { VolumeMeter } = require('./volume-meter')

@@ -1,4 +1,4 @@
-const SignalServer = require('simple-signal-server')
+const SignalServer = require('@gurupras/simple-signal-server')
 const debugLogger = require('debug-logger')
 
 class SimpleSignalServer {
@@ -21,7 +21,7 @@ class SimpleSignalServer {
 
   async initialize (io) {
     const { SignalServerImpl } = this
-    const signalServer = SignalServerImpl(io)
+    const signalServer = new SignalServerImpl(io)
     signalServer.on('discover', async (request) => {
       const { log, getPeersOfSocket, getPeerIDFromSocket } = this
       const { socket } = request

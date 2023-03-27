@@ -16,6 +16,13 @@ const createMockRequest = (selfID) => {
 }
 
 let mockSignalServer
+
+class Mock {
+  constructor () {
+    return mockSignalServer
+  }
+}
+
 beforeEach(() => {
   mockSignalServer = new Emittery()
 })
@@ -59,7 +66,7 @@ describe('SimpleSignalServer', () => {
         getPeersOfSocket: jest.fn().mockImplementation(async () => {
           return peers
         })
-      }, () => mockSignalServer)
+      }, Mock)
       server.initialize()
     })
 
